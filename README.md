@@ -1,14 +1,14 @@
 # ESP32 VR Pinball Controller
 
-A Bluetooth Low Energy (BLE) HID controller for VR pinball on Quest, using an ESP32 microcontroller and an MPU6050 accelerometer.  
-This controller supports two runtime modes to work with different VR pinball games:
+A Bluetooth Low Energy (BLE) HID controller for VR pinball on Meta Quest, powered by an ESP32 and an MPU6050 sensor for realistic nudging.  
+The controller features two runtime modes for compatibility across different titles:
 
 - BLE keyboard mode: **Pinball FX VR**
 - BLE gamepad mode: **Pinball VR Classic**
 
 Successfully tested on Quest 3 and should work with PCVR pinball games with minor adjustments.
 
-Happy playing! :smile:
+Literally a game changer! :star_struck:
 
 > ## Table of Contents
 >
@@ -31,7 +31,7 @@ Happy playing! :smile:
 ## Hardware Requirements
 
 ![VR Pinball controller](assets/vrpc.jpg)
-The lockbar is a genuine original Bally. :star_struck:
+The lockbar is a genuine original Bally. :smile:
 
 ### Main Components
 
