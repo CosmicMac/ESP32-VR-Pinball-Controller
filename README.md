@@ -38,8 +38,10 @@ The lockbar is a genuine original Bally. :star_struck:
 - **ESP32-S3** development board (other ESP32 variants should work too, provided they have BLE and enough GPIO pins)
 - **MPU6050** 6-axis accelerometer/gyroscope module (I²C interface)
 - **11 momentary push buttons**, (actually less are required for FX & Classic, but this is for future proofing and custom mapping support with PCVR games)
-  > [!TIP]
-  > GoldLeaf Pushbuttons from Ultimarc are great for this purpose.
+
+> [!TIP]
+> GoldLeaf Pushbuttons from Ultimarc are great for this purpose.
+ 
 - **Arcade joystick** for D-pad input (optional, can be replaced with 4 buttons, only required for VR Classic to navigate menus)
 - 5v power supply (I use a 5V power bank)
 
@@ -90,8 +92,9 @@ Connect one side to the specified GPIO and the other side to GND.
 #### ESP32 3.3.6 *by Espressif Systems*
 
 - See https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html#board-manager-settings
-  > [!CAUTION]
-  > At the time of writing, the `3.3.7` version seems incompatible with the BLE library.
+
+> [!CAUTION]
+> At the time of writing, the `3.3.7` version seems incompatible with the BLE library.
 
 ### Libraries
 
