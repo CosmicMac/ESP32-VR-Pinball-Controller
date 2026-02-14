@@ -1,0 +1,44 @@
+# CMake build directories
+cmake-build-*/
+build/
+out/
+
+# CLion IDE
+.idea/
+*.iml
+
+# Arduino IDE
+*.elf
+*.bin
+*.hex
+*.map
+
+# ESP32/ESP-IDF
+sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# Compilation artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.d
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor temporary files
+*~
+*.swp
+*.swo
+*.tmp
+
+# Build optimization artifacts
+*.optimization
+
+# Miscellaneous
+assets/src
