@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 ##############################################################################
 set(ARDUINO_CLI "arduino-cli")              # Path to arduino-cli
 set(FQBN "esp32:esp32:esp32s3")             # Fully Qualified Board Name
-set(PORT "COM6_")                            # Serial port for uploading (e.g., COM3 on Windows or /dev/ttyUSB0 on Linux)
+set(PORT "COM8")                            # Serial port for uploading (e.g., COM3 on Windows or /dev/ttyUSB0 on Linux)
 set(BOARD_OPTIONS "UploadSpeed=921600")     # Board options for the ESP32 upload
 set(USER_LIBS_DIRS                          # User libraries to include
         "ESP32-BLE-CompositeHID"
