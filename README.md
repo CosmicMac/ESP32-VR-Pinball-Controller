@@ -21,7 +21,7 @@ Literally a game changer! :star_struck:
 
 ## Features
 
-- BLE HID communication using the [SQUIDHID](https://github.com/gargum/SQUIDHID) library (great lib, thanks @gargum)
+- BLE HID communication using the [Mystfit/ESP32-BLE-CompositeHID](https://github.com/Mystfit/ESP32-BLE-CompositeHID) library (great lib, thanks [@Mystfit](https://github.com/Mystfit))
 - Debounced button handling with `INPUT_PULLUP` wiring (pressed state = `LOW`)
 - Runtime mode switching via long press of **`Select` + `Start`** buttons
 - MPU6050 motion interrupt-based nudge detection with direction analysis
@@ -41,7 +41,7 @@ The lockbar is a genuine original Bally. :smile:
 
 > [!TIP]
 > GoldLeaf Pushbuttons from Ultimarc are great for this purpose.
- 
+
 - **Arcade joystick** for D-pad input (optional, can be replaced with 4 buttons, only required for VR Classic to navigate menus)
 - 5v power supply (I use a 5V power bank)
 
@@ -94,7 +94,7 @@ Connect one side to the specified GPIO and the other side to GND.
 - See https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html#board-manager-settings
 
 > [!CAUTION]
-> At the time of writing, the `3.3.7` version seems incompatible with the BLE library.
+> At the time of writing, the `3.3.7` version seems incompatible with the [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) library used under the hood.
 
 ### Libraries
 
@@ -110,9 +110,9 @@ Connect one side to the specified GPIO and the other side to GND.
 - Click "Filter your search" and type "MPU6050 cats".
 - Select version `1.4.4` and click the "Install" button.
 
-#### SquidHID library *by gargum*
+#### ESP32-BLE-CompositeHID library *by Mystfit*
 
-- In you browser, go to https://github.com/gargum/SQUIDHID
+- In you browser, go to https://github.com/Mystfit/ESP32-BLE-CompositeHID
 - Download the .ZIP file of this repo.
 - In the Arduino IDE go to "Sketch" -> "Include Library" -> "Add .ZIP Library..." and select the file you just downloaded.
 
@@ -136,12 +136,12 @@ A 6 seconds cooldown prevents accidental mode switching.
 ### Nudge Detection
 
 1. The MPU6050 detects table nudges via motion interrupt:
-1. Motion exceeds threshold → interrupt triggered
-1. Controller samples accelerometer 10 times
-1. Dominant axis determines nudge direction (up/down/left/right)
-1. **FX Mode:** Sends corresponding keyboard key
-1. **Classic Mode:** Deflects left analog stick to full scale
-1. After 100ms, input returns to neutral
+2. Motion exceeds threshold → interrupt triggered
+3. Controller samples accelerometer 10 times
+4. Dominant axis determines nudge direction (up/down/left/right)
+5. **FX Mode:** Sends corresponding keyboard key
+6. **Classic Mode:** Deflects left analog stick to full scale
+7. After 100ms, input returns to neutral
 
 ## Troubleshooting
 
