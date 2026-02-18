@@ -4,7 +4,7 @@ It extracts the necessary include paths from arduino-cli's output to ensure that
 If you want to use this CMakeLists.txt, make sure to adjust the configuration section with the correct settings for your environment.
 ]]
 cmake_minimum_required(VERSION 3.20)
-project(ESP32_Pinball_Controller_SQUIDHID)
+project(ESP32_Pinball_Controller_Composite)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,15 +14,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 ##############################################################################
 set(ARDUINO_CLI "arduino-cli")              # Path to arduino-cli
 set(FQBN "esp32:esp32:esp32s3")             # Fully Qualified Board Name
-set(PORT "COM8")                            # Serial port for uploading (e.g., COM3 on Windows or /dev/ttyUSB0 on Linux)
+set(PORT "COM6_")                            # Serial port for uploading (e.g., COM3 on Windows or /dev/ttyUSB0 on Linux)
 set(BOARD_OPTIONS "UploadSpeed=921600")     # Board options for the ESP32 upload
 set(USER_LIBS_DIRS                          # User libraries to include
-        "SquidHID"
+        "ESP32-BLE-CompositeHID"
         "MPU6050"
 )
-set(ARDUINO_EXTRA_FLAGS                     # Extra flags for compilation
-        "-DGAMEPAD_ENABLE=true"
-)
+#set(ARDUINO_EXTRA_FLAGS                     # Extra flags for compilation
+#        "-DGAMEPAD_ENABLE=true"
+#)
 
 ##############################################################################
 # Get compilation properties via arduino-cli

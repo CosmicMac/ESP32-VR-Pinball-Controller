@@ -1,5 +1,7 @@
 #include <Arduino.h>
-#include <SQUIDHID.h>
+#include <KeyboardDevice.h>
+#include <XboxGamepadDevice.h>
+#include <BleCompositeHID.h>
 #include <MPU6050.h>
 
 // ###########################################################################
@@ -43,33 +45,32 @@ constexpr uint8_t MPU_INT_PIN        = 10; // MPU6050 interruption
 constexpr uint8_t DEFAULT_MODE_PIN   = 21; // High = Pinball FX VR as default mode (keyboard), Low = Pinball VR Classic as default mode (gamepad)
 
 // Mapping between user actions and keyboard keys (Pinball FX VR)
-constexpr NKROKey KEY_NONE{0}; // Dummy key
-constexpr NKROKey KEY_LAUNCH_BALL   = KC_8;
-constexpr NKROKey KEY_LEFT_FLIPPER  = KC_U;
-constexpr NKROKey KEY_RIGHT_FLIPPER = KC_6;
-constexpr NKROKey KEY_PAUSE         = KC_I;
-constexpr NKROKey KEY_NUDGE_UP      = KC_A;
-constexpr NKROKey KEY_NUDGE_DOWN    = KC_S;
-constexpr NKROKey KEY_NUDGE_RIGHT   = KC_D;
-constexpr NKROKey KEY_NUDGE_LEFT    = KC_F;
-constexpr NKROKey KEY_MAGNA_SAVE    = KC_8; // idem KEY_LAUNCH_BALL
-constexpr NKROKey KEY_POWER_UP      = KC_5;
+constexpr uint8_t KEY_LAUNCH_BALL   = KEY_8;
+constexpr uint8_t KEY_LEFT_FLIPPER  = KEY_U;
+constexpr uint8_t KEY_RIGHT_FLIPPER = KEY_6;
+constexpr uint8_t KEY_PAUSE_GAME    = KEY_I;
+constexpr uint8_t KEY_NUDGE_UP      = KEY_A;
+constexpr uint8_t KEY_NUDGE_DOWN    = KEY_S;
+constexpr uint8_t KEY_NUDGE_RIGHT   = KEY_D;
+constexpr uint8_t KEY_NUDGE_LEFT    = KEY_F;
+constexpr uint8_t KEY_MAGNA_SAVE    = KEY_8; // idem KEY_LAUNCH_BALL
+constexpr uint8_t KEY_POWER_UP      = KEY_5;
 
 // Mapping between user actions and gamepad buttons (Pinball VR Classic)
-constexpr GamepadButton GAMEPAD_NONE{0};               // Dummy button
-constexpr GamepadButton GAMEPAD_BTN_SELECT    = GB_BA; // Back
-constexpr GamepadButton GAMEPAD_BTN_START     = GB_ST; // Start
-constexpr GamepadButton GAMEPAD_LAUNCH_BALL   = GB_WE; // X
-constexpr GamepadButton GAMEPAD_LEFT_FLIPPER  = GB_L1; // Trigger 1 left
-constexpr GamepadButton GAMEPAD_RIGHT_FLIPPER = GB_R1; // Trigger 1 right
-constexpr GamepadButton GAMEPAD_BTN_A         = GB_SO; // A
-constexpr GamepadButton GAMEPAD_BTN_B         = GB_EA; // B
-constexpr GamepadButton GAMEPAD_BTN_X         = GB_WE; // X
-constexpr GamepadButton GAMEPAD_BTN_Y         = GB_NO; // Y
-constexpr GamepadButton GAMEPAD_BTN_UP        = GB_UP; // Up
-constexpr GamepadButton GAMEPAD_BTN_DOWN      = GB_DO; // Down
-constexpr GamepadButton GAMEPAD_BTN_LEFT      = GB_LE; // Left
-constexpr GamepadButton GAMEPAD_BTN_RIGHT     = GB_RI; // Right
+constexpr uint8_t GAMEPAD_NONE          = 0; // Dummy button
+constexpr uint8_t GAMEPAD_SELECT        = XBOX_BUTTON_SELECT;
+constexpr uint8_t GAMEPAD_START         = XBOX_BUTTON_START;
+constexpr uint8_t GAMEPAD_LAUNCH_BALL   = XBOX_BUTTON_X;
+constexpr uint8_t GAMEPAD_LEFT_FLIPPER  = XBOX_BUTTON_LB;
+constexpr uint8_t GAMEPAD_RIGHT_FLIPPER = XBOX_BUTTON_RB;
+constexpr uint8_t GAMEPAD_A             = XBOX_BUTTON_A;
+constexpr uint8_t GAMEPAD_B             = XBOX_BUTTON_B;
+constexpr uint8_t GAMEPAD_X             = XBOX_BUTTON_X;
+constexpr uint8_t GAMEPAD_Y             = XBOX_BUTTON_Y;
+constexpr uint8_t GAMEPAD_UP            = XBOX_BUTTON_DPAD_NORTH;
+constexpr uint8_t GAMEPAD_DOWN          = XBOX_BUTTON_DPAD_SOUTH;
+constexpr uint8_t GAMEPAD_LEFT          = XBOX_BUTTON_DPAD_WEST;
+constexpr uint8_t GAMEPAD_RIGHT         = XBOX_BUTTON_DPAD_EAST;
 
 // Array of button configurations
 constexpr uint8_t NUM_BUTTONS = 15;
@@ -77,8 +78,8 @@ constexpr uint8_t NUM_BUTTONS = 15;
 struct ButtonInfo
 {
     uint8_t pin;                    // GPIO pin number for the button
-    GamepadButton button;           // Associated gamepad button mapping
-    NKROKey key;                    // Associated keyboard key mapping
+    uint8_t button;                 // Associated gamepad button mapping
+    uint8_t key;                    // Associated keyboard key mapping
     int state;                      // Current debounced state (HIGH or LOW)
     unsigned long lastDebounceTime; // Timestamp of the last debounce event (in ms)
 };
@@ -88,20 +89,20 @@ ButtonInfo buttons[NUM_BUTTONS] = {
 //                          Classic                 FX
 //   Button pin             Gamepad button          Keyboard key        State   Debounce time
     {BTN_LAUNCH_PIN,        GAMEPAD_LAUNCH_BALL,    KEY_LAUNCH_BALL,    HIGH,   0},
-    {BTN_A_PIN,             GAMEPAD_BTN_A,          KEY_LAUNCH_BALL,    HIGH,   0},
-    {BTN_B_PIN,             GAMEPAD_BTN_B,          KEY_POWER_UP,       HIGH,   0},
-    {BTN_X_PIN,             GAMEPAD_BTN_X,          KEY_PAUSE,          HIGH,   0},
-    {BTN_Y_PIN,             GAMEPAD_BTN_Y,          KEY_PAUSE,          HIGH,   0},
-    {BTN_SELECT_PIN,        GAMEPAD_BTN_SELECT,     KEY_PAUSE,          HIGH,   0},
-    {BTN_START_PIN,         GAMEPAD_BTN_START,      KEY_PAUSE,          HIGH,   0},
+    {BTN_A_PIN,             GAMEPAD_A,              KEY_LAUNCH_BALL,    HIGH,   0},
+    {BTN_B_PIN,             GAMEPAD_B,              KEY_POWER_UP,       HIGH,   0},
+    {BTN_X_PIN,             GAMEPAD_X,              KEY_PAUSE_GAME,     HIGH,   0},
+    {BTN_Y_PIN,             GAMEPAD_Y,              KEY_PAUSE_GAME,     HIGH,   0},
+    {BTN_SELECT_PIN,        GAMEPAD_SELECT,         KEY_PAUSE_GAME,     HIGH,   0},
+    {BTN_START_PIN,         GAMEPAD_START,          KEY_PAUSE_GAME,     HIGH,   0},
     {BTN_L1_PIN,            GAMEPAD_LEFT_FLIPPER,   KEY_LEFT_FLIPPER,   HIGH,   0},
     {BTN_R1_PIN,            GAMEPAD_RIGHT_FLIPPER,  KEY_RIGHT_FLIPPER,  HIGH,   0},
     {BTN_L2_PIN,            GAMEPAD_NONE,           KEY_MAGNA_SAVE,     HIGH,   0},
     {BTN_R2_PIN,            GAMEPAD_NONE,           KEY_MAGNA_SAVE,     HIGH,   0},
-    {JOYSTICK_LEFT_PIN,     GAMEPAD_BTN_LEFT,       KEY_NUDGE_LEFT,     HIGH,   0},
-    {JOYSTICK_RIGHT_PIN,    GAMEPAD_BTN_RIGHT,      KEY_NUDGE_RIGHT,    HIGH,   0},
-    {JOYSTICK_UP_PIN,       GAMEPAD_BTN_UP,         KEY_NUDGE_UP,       HIGH,   0},
-    {JOYSTICK_DOWN_PIN,     GAMEPAD_BTN_DOWN,       KEY_NUDGE_DOWN,     HIGH,   0},
+    {JOYSTICK_LEFT_PIN,     GAMEPAD_LEFT,           KEY_NUDGE_LEFT,     HIGH,   0},
+    {JOYSTICK_RIGHT_PIN,    GAMEPAD_RIGHT,          KEY_NUDGE_RIGHT,    HIGH,   0},
+    {JOYSTICK_UP_PIN,       GAMEPAD_UP,             KEY_NUDGE_UP,       HIGH,   0},
+    {JOYSTICK_DOWN_PIN,     GAMEPAD_DOWN,           KEY_NUDGE_DOWN,     HIGH,   0},
 };
 //@formatter:on
 
@@ -119,8 +120,11 @@ enum class LedState : uint8_t { OFF, INITIALIZATION, FX_MODE_ACTIVE, CLASSIC_MOD
 
 // GLOBAL VARIABLES
 
+BleCompositeHID compositeHID(DEVICE_NAME, DEVICE_MANUFACTURER, 100);
+KeyboardDevice* keyboard;
+XboxGamepadDevice* gamepad;
+
 MPU6050 mpu;
-SQUIDHID hidDevice(DEVICE_NAME, DEVICE_MANUFACTURER);
 volatile bool motionIRQ = false;
 auto controllerMode     = ControllerMode::UNDEFINED;
 
@@ -169,8 +173,7 @@ void loop() {
 
     // HID DEVICE HANDLER
 
-    hidDevice.update();
-    if (!hidDevice.isConnected()) {
+    if (!compositeHID.isConnected()) {
         Serial.println("Waiting connection...");
         delay(1000);
         return;
@@ -180,7 +183,7 @@ void loop() {
 
     static unsigned long lastNudgeMillis = 0;
     static bool isNudging                = false;
-    static NKROKey nudgeKey(0);
+    static uint8_t nudgeKey;
 
     if (motionIRQ) {
         motionIRQ = false;
@@ -220,30 +223,30 @@ void loop() {
 
             if (abs(maxX) > abs(maxY)) {
                 if (controllerMode == ControllerMode::FX) nudgeKey = KEY_NUDGE_UP;
-                else hidDevice.setLeftStick(0, -32768);
+                else gamepad->setLeftThumb(0, -32768);
                 Serial.println("Nudge up");
             }
             else {
                 int16_t nudgeY = maxY;
                 if (nudgeY > 0) {
                     if (controllerMode == ControllerMode::FX) nudgeKey = KEY_NUDGE_LEFT;
-                    else hidDevice.setLeftStick(-32768, 0);
+                    else gamepad->setLeftThumb(-32768, 0);
                     Serial.println("Nudge left");
                 }
                 else {
                     if (controllerMode == ControllerMode::FX) nudgeKey = KEY_NUDGE_RIGHT;
-                    else hidDevice.setLeftStick(32767, 0);
+                    else gamepad->setLeftThumb(32767, 0);
                     Serial.println("Nudge right");
                 }
             }
-            if (controllerMode == ControllerMode::FX) hidDevice.press(nudgeKey);
+            if (controllerMode == ControllerMode::FX) keyboard->keyPress(nudgeKey);
         }
     }
 
     if (isNudging && (currentMillis - lastNudgeMillis > NUDGE_RESET_MS)) {
         isNudging = false;
-        if (controllerMode == ControllerMode::FX) hidDevice.release(nudgeKey);
-        else hidDevice.setLeftStick(0, 0);
+        if (controllerMode == ControllerMode::FX) keyboard->keyRelease(nudgeKey);
+        else gamepad->setLeftThumb(0, 0);
     }
 
     // CONTROLLER MODE SWITCH HANDLER
@@ -307,10 +310,7 @@ void IRAM_ATTR onMotionInterrupt() {
  * @param state The LedState to set the RGB LED to
  */
 void setRgbLedState(const LedState state) {
-#ifndef RGB_BUILTIN
-    return;
-#endif
-
+#ifdef RGB_BUILTIN
     switch (state) {
     case LedState::OFF:
         rgbLedWrite(RGB_BUILTIN, 0, 0, 0);
@@ -325,6 +325,7 @@ void setRgbLedState(const LedState state) {
         rgbLedWrite(RGB_BUILTIN, 0, RGB_BRIGHTNESS, 0); // Green, like in Gamepad
         break;
     }
+#endif
 }
 
 
@@ -334,7 +335,7 @@ void setRgbLedState(const LedState state) {
  * @param button Reference to the ButtonInfo struct representing the button to handle
  */
 void handleButton(ButtonInfo& button) {
-    if (!hidDevice.isConnected()) {
+    if (!compositeHID.isConnected()) {
         return;
     }
 
@@ -347,19 +348,19 @@ void handleButton(ButtonInfo& button) {
         button.lastDebounceTime = millis();
         if (button.state == LOW) {
             if (controllerMode == ControllerMode::FX) {
-                hidDevice.press(button.key);
+                keyboard->keyPress(button.key);
             }
             else {
-                hidDevice.press(button.button);
+                gamepad->press(button.button);
             }
             Serial.printf("Button on pin %d pressed\n", button.pin);
         }
         else {
             if (controllerMode == ControllerMode::FX) {
-                if (button.key != KEY_NONE) hidDevice.release(button.key);
+                keyboard->keyRelease(button.key);
             }
             else {
-                if (button.button != GAMEPAD_NONE) hidDevice.release(button.button);
+                if (button.button != GAMEPAD_NONE) gamepad->release(button.button);
             }
             Serial.printf("Button on pin %d released\n", button.pin);
         }
@@ -372,9 +373,27 @@ void handleButton(ButtonInfo& button) {
  */
 void setupHIDDevice() {
     Serial.println("Initializing HID device...");
-    hidDevice.setAppearance(GAMEPAD);
-    hidDevice.begin();
-    while (!hidDevice.isConnected()) {
+
+    // Initialize keyboard device
+    keyboard = new KeyboardDevice();
+    compositeHID.addDevice(keyboard);
+
+    // Initialize gamepad device
+    auto* config = new XboxSeriesXControllerDeviceConfiguration();
+    gamepad      = new XboxGamepadDevice(config);
+    compositeHID.addDevice(gamepad);
+
+    // BLEHostConfiguration bleHostConfig;
+    // bleHostConfig.setHidType(HID_GAMEPAD);
+    // bleHostConfig.setVid(32); // N'importe quelle valeur
+    // bleHostConfig.setPid(48);
+
+    // The composite HID device pretends to be a valid Xbox controller via vendor and product IDs (VID/PID).
+    // Platforms like windows/linux need this in order to pick an XInput driver over the generic BLE GATT HID driver.
+    BLEHostConfiguration bleHostConfig = config->getIdealHostConfiguration();
+    compositeHID.begin(bleHostConfig);
+
+    while (!compositeHID.isConnected()) {
         Serial.println("Waiting connection...");
         delay(1000);
     }
@@ -447,9 +466,9 @@ void calibrateSensor(const uint16_t samples) {
     const float sigmaX = sqrtf(sx2 / validSamples - meanX * meanX);
     const float sigmaY = sqrtf(sy2 / validSamples - meanY * meanY);
 
-    Serial.printf("Calibration done (%d samples)!", validSamples);
-    Serial.printf("Mean X/Y:\t\t%f\t\t%f", meanX, meanY);
-    Serial.printf("Sigma X/Y:\t\t%f\t\t%f", sigmaX, sigmaY);
+    Serial.printf("Calibration done (%d samples)!\n", validSamples);
+    Serial.printf("Mean X/Y:\t\t%f\t\t%f\n", meanX, meanY);
+    Serial.printf("Sigma X/Y:\t\t%f\t\t%f\n", sigmaX, sigmaY);
 }
 
 
