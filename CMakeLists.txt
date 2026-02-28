@@ -4,7 +4,7 @@ It extracts the necessary include paths from arduino-cli's output to ensure that
 If you want to use this CMakeLists.txt, make sure to adjust the configuration section with the correct settings for your environment.
 ]]
 cmake_minimum_required(VERSION 3.20)
-project(ESP32_Pinball_Controller_SQUIDHID)
+project(ESP32_VR_Pinball_Controller)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,12 +17,16 @@ set(FQBN "esp32:esp32:esp32s3")             # Fully Qualified Board Name
 set(PORT "COM8")                            # Serial port for uploading (e.g., COM3 on Windows or /dev/ttyUSB0 on Linux)
 set(BOARD_OPTIONS "UploadSpeed=921600")     # Board options for the ESP32 upload
 set(USER_LIBS_DIRS                          # User libraries to include
-        "SquidHID"
+        "NimBLE-Arduino"
         "MPU6050"
 )
-set(ARDUINO_EXTRA_FLAGS                     # Extra flags for compilation
-        "-DGAMEPAD_ENABLE=true"
+set(PLATFORM_LIBS_DIRS                      # Built-in ESP32 platform libraries to include
+        "Preferences"
+        "Wire"
 )
+#set(ARDUINO_EXTRA_FLAGS                     # Extra flags for compilation
+#        "-DGAMEPAD_ENABLE=true"
+#)
 
 ##############################################################################
 # Get compilation properties via arduino-cli
@@ -74,12 +78,17 @@ file(GLOB_RECURSE SOURCES "*.ino" "*.cpp" "*.c")
 set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CXX)
 
 # Create a "dummy" executable so that CLion indexes the files
-add_executable(${PROJECT_NAME} ${SOURCES})
+add_executable(${PROJECT_NAME} ${SOURCES}
+        ESP32_VR_Pinball_Controller.h
+        config.h
+)
 
 
 ##############################################################################
 # Injection of Includes
 ##############################################################################
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR})
+
 if (CORE_PATH)
     target_include_directories(${PROJECT_NAME} PRIVATE ${CORE_PATH})
     message(STATUS "Core path: ${CORE_PATH}")
@@ -95,6 +104,7 @@ if (PLATFORM_PATH)
     target_include_directories(${PROJECT_NAME} PRIVATE
             ${PLATFORM_PATH}/tools/sdk/include
             ${PLATFORM_PATH}/tools/sdk/esp32/include
+            ${PLATFORM_PATH}/cores/esp32
     )
 
     message(STATUS "Platform path: ${PLATFORM_PATH}")
@@ -127,10 +137,24 @@ foreach (USER_LIB_DIR ${USER_LIBS_DIRS})
     endif ()
 endforeach ()
 
+# Built-in ESP32 platform libraries includes (e.g. Preferences, SPIFFS, etc.)
+if (PLATFORM_PATH)
+    foreach (PLATFORM_LIB_DIR ${PLATFORM_LIBS_DIRS})
+        if (IS_DIRECTORY "${PLATFORM_PATH}/libraries/${PLATFORM_LIB_DIR}/src")
+            target_include_directories(${PROJECT_NAME} PRIVATE "${PLATFORM_PATH}/libraries/${PLATFORM_LIB_DIR}/src")
+            message(STATUS "${PLATFORM_LIB_DIR} path: ${PLATFORM_PATH}/libraries/${PLATFORM_LIB_DIR}/src")
+        elseif (IS_DIRECTORY "${PLATFORM_PATH}/libraries/${PLATFORM_LIB_DIR}")
+            target_include_directories(${PROJECT_NAME} PRIVATE "${PLATFORM_PATH}/libraries/${PLATFORM_LIB_DIR}")
+            message(STATUS "${PLATFORM_LIB_DIR} path: ${PLATFORM_PATH}/libraries/${PLATFORM_LIB_DIR}")
+        else ()
+            message(WARNING "Platform library path not found: ${PLATFORM_PATH}/libraries/${PLATFORM_LIB_DIR}")
+        endif ()
+    endforeach ()
+endif ()
+
 # Indexing and syntax highlighting
 target_compile_definitions(${PROJECT_NAME} PUBLIC
-        CONFIG_BT_ENABLED=1
-        GAMEPAD_ENABLE=true
+        ARDUINO=100
 )
 
 ##############################################################################

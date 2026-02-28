@@ -1,0 +1,278 @@
+#include "BleHidController.h"
+
+//@formatter:off
+// Combined report map (keyboard + gamepad)
+static const uint8_t hidReportMapData[] = {
+
+    // **** Keyboard (Report ID 1) ****
+
+    0x05, 0x01,               // Usage Page (Generic Desktop)
+    0x09, 0x06,               // Usage (Keyboard)
+    0xA1, 0x01,               // Collection (Application)
+    0x85, REPORT_ID_KEYBOARD, // Report ID
+
+    // Modifiers (Ctrl, Shift, Alt, Meta)
+    0x05, 0x07,               // Usage Page (Keyboard)
+    0x19, 0xE0,               // Usage Minimum (Left Control)
+    0x29, 0xE7,               // Usage Maximum (Right Meta)
+    0x15, 0x00,               // Logical Minimum 0
+    0x25, 0x01,               // Logical Maximum 1
+    0x95, 0x08,               // Report Count 8
+    0x75, 0x01,               // Report Size 1 bit
+    0x81, 0x02,               // Input (Data, Variable, Absolute)
+
+    // 6 simultaneous keys (keycode table)
+    0x05, 0x07,               // Usage Page (Keyboard)
+    0x19, 0x00,               // Usage Minimum (0 = Aucun événement)
+    0x29, 0xFF,               // Usage Maximum (0xFF)
+    0x15, 0x00,               // Logical Minimum 0
+    0x26, 0xFF, 0x00,         // Logical Maximum 0x00FF
+    0x95, 0x06,               // Report Count 6
+    0x75, 0x08,               // Report Size 8 bits
+    0x81, 0x00,               // Input (Data, Array, Absolute)
+
+    // End Collection
+    0xC0,
+
+    // **** Gamepad (Report ID 2) ****
+    0x05, 0x01,               // Usage Page (Generic Desktop)
+    0x09, 0x05,               // Usage (Gamepad)
+    0xA1, 0x01,               // Collection (Application)
+    0x85, REPORT_ID_GAMEPAD,  // Report ID
+
+    // 16 buttons
+    0x05, 0x09,               // Usage Page (Button)
+    0x19, 0x01,               // Usage Minimum (Button 1)
+    0x29, 0x10,               // Usage Maximum (Button 16)
+    0x15, 0x00,               // Logical Minimum 0
+    0x25, 0x01,               // Logical Maximum 1
+    0x75, 0x01,               // Report Size 1 bit
+    0x95, 0x10,               // Report Count 16
+    0x81, 0x02,               // Input (Data, Variable, Absolute)
+
+    // D-Pad (hat switch)
+    0x05, 0x01,               // Usage Page (Generic Desktop)
+    0x09, 0x39,               // Usage (Hat switch)
+    0x15, 0x00,               // Logical Min 0
+    0x25, 0x07,               // Logical Max 7 (8 directions)
+    0x75, 0x04,               // Report Size 4 bits
+    0x95, 0x01,               // Report Count 1
+    0x81, 0x42,               // Input (Data, Variable, Absolute, Null state)
+    0x75, 0x04,               // Report Size 4 bits (padding)
+    0x95, 0x01,               // Report Count 1
+    0x81, 0x03,               // Input (Constant, Variable, Absolute)
+
+    // Joysticks
+    0x09, 0x30,               // Usage Left X
+    0x09, 0x31,               // Usage Left Y
+    0x09, 0x33,               // Usage Right X
+    0x09, 0x34,               // Usage Right Y
+    0x16, 0x00, 0x80,         // Logical Min 0x8000 (-32768)
+    0x26, 0xFF, 0x7F,         // Logical Max 0x7FFF (32767)
+    0x75, 0x10,               // Report Size 16 bits
+    0x95, 0x04,               // Report Count 4
+    0x81, 0x02,               // Input (Data, Variable, Absolute)
+
+    // Gâchettes LT/RT
+    0x05, 0x02,               // Usage Page (Simulation Controls) ou autre, ici 0x02
+    0x09, 0xC5,               // Usage (Brake ou Trigger selon la table)
+    0x09, 0xC4,               // Usage (Accelerator / autre)
+    0x15, 0x00,               // Logical Min 0
+    0x26, 0xFF, 0x03,         // Logical Max 0x03FF (1023)
+    0x75, 0x10,               // Report Size 16 bits
+    0x95, 0x02,               // Report Count 2
+    0x81, 0x02,               // Input (Data, Variable, Absolute)
+
+    // End Collection
+    0xC0
+};
+//@formatter:on
+
+bool BleHidController::_deviceConnected = false;
+
+// Internal callbacks
+class BleHidController::ServerCallbacks : public NimBLEServerCallbacks
+{
+    void onConnect(NimBLEServer* pSrv, NimBLEConnInfo& connInfo) override {
+        BleHidController::_deviceConnected = true;
+        pSrv->updateConnParams(connInfo.getConnHandle(), 6, 7, 0, 600);
+    }
+
+    void onDisconnect(NimBLEServer* pSrv, NimBLEConnInfo& connInfo, int reason) override {
+        BleHidController::_deviceConnected = false;
+        NimBLEDevice::startAdvertising();
+    }
+};
+
+// Class implementation
+BleHidController::BleHidController() = default;
+
+
+void BleHidController::begin(const char* deviceName, const char* deviceManufacturer, uint16_t vendorId, uint16_t productId, uint16_t version) {
+    if (_hidDevice != nullptr) {
+        return; // Already initialized
+    }
+
+    NimBLEDevice::init(deviceName);
+    NimBLEDevice::setPower(BLE_TX_POWER);
+    NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+
+    _server = NimBLEDevice::createServer();
+
+    static ServerCallbacks serverCb;
+    _server->setCallbacks(&serverCb);
+
+    _server->advertiseOnDisconnect(false);
+
+    _hidDevice = new NimBLEHIDDevice(_server);
+    _hidDevice->setManufacturer(deviceManufacturer);
+    _hidDevice->setPnp(PNP_VENDOR_SRC_USB, vendorId, productId, version);
+    _hidDevice->setHidInfo(0x00, 0x01);
+    _hidDevice->setBatteryLevel(BATTERY_LEVEL);
+    _hidDevice->setReportMap((uint8_t*)hidReportMapData, sizeof(hidReportMapData));
+
+    _kbInputReport = _hidDevice->getInputReport(REPORT_ID_KEYBOARD);
+    _gpInputReport = _hidDevice->getInputReport(REPORT_ID_GAMEPAD);
+
+    _hidDevice->startServices();
+
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    adv->setName(deviceName);
+    adv->addServiceUUID(_hidDevice->getHidService()->getUUID());
+    adv->addServiceUUID(_hidDevice->getBatteryService()->getUUID());
+    adv->setAppearance(HID_KEYBOARD); // Or GENERIC_HID as Meta Quest 3 doesn't seem to accept HID_GAMEPAD !HERE
+    adv->enableScanResponse(true);
+    adv->start();
+}
+
+
+// ***************************************************************
+// KEYBOARD API
+// ***************************************************************
+
+void BleHidController::sendKeyboardState() {
+    _kbInputReport->setValue((uint8_t*)&_kbState, sizeof(_kbState));
+    _kbInputReport->notify();
+}
+
+/**
+ * Add modifier bit and send report
+ *
+ * @param modifier
+ */
+void BleHidController::keyModPress(uint8_t modifier) {
+    if (!_deviceConnected || _kbInputReport == nullptr) return;
+    _kbState.modifiers |= modifier;
+    sendKeyboardState();
+}
+
+/**
+ * Remove modifier bit and send report
+ *
+ * @param modifier
+ */
+void BleHidController::keyModRelease(uint8_t modifier) {
+    if (!_deviceConnected || _kbInputReport == nullptr) return;
+    _kbState.modifiers &= ~modifier;
+    sendKeyboardState();
+}
+
+/**
+ * Add keycode to the first available slot in the keys array and send report
+ *
+ * @param keycode
+ */
+void BleHidController::keyPress(uint8_t keycode) {
+    if (!_deviceConnected || _kbInputReport == nullptr) return;
+    for (size_t i = 0; i < 6; ++i) {
+        if (_kbState.keys[i] == 0x00) {
+            _kbState.keys[i] = keycode;
+            break;
+        }
+    }
+    sendKeyboardState();
+}
+
+/**
+ * Remove keycode from the keys array and send report
+ *
+ * @param keycode
+ */
+void BleHidController::keyRelease(uint8_t keycode) {
+    if (!_deviceConnected || _kbInputReport == nullptr) return;
+
+    // Remove the keycode from the keys array
+    for (size_t i = 0; i < 6; ++i) {
+        if (_kbState.keys[i] == keycode) {
+            _kbState.keys[i] = 0x00;
+            break;
+        }
+    }
+    sendKeyboardState();
+}
+
+/**
+ * Clear all active key presses and modifier states and send report
+ */
+void BleHidController::keyReleaseAll() {
+    if (!_deviceConnected || _kbInputReport == nullptr) return;
+    _kbState = KeyReport{};
+    sendKeyboardState();
+}
+
+
+// ***************************************************************
+//  GAMEPAD API
+// ***************************************************************
+
+void BleHidController::sendGamepadState() {
+    _gpInputReport->setValue((uint8_t*)&_gpState, sizeof(_gpState));
+    _gpInputReport->notify();
+}
+
+void BleHidController::buttonPress(uint16_t button) {
+    if (!_deviceConnected || _gpInputReport == nullptr) return;
+    _gpState.buttons |= button;
+    sendGamepadState();
+}
+
+void BleHidController::buttonRelease(uint16_t button) {
+    if (!_deviceConnected || _gpInputReport == nullptr) return;
+    _gpState.buttons &= ~button;
+    sendGamepadState();
+}
+
+void BleHidController::dpadPress(uint8_t dpad) {
+    if (!_deviceConnected || _gpInputReport == nullptr) return;
+    _gpState.dpad = dpad;
+    sendGamepadState();
+}
+
+void BleHidController::dpadRelease() {
+    if (!_deviceConnected || _gpInputReport == nullptr) return;
+    _gpState.dpad = DPAD_CENTERED;
+    sendGamepadState();
+}
+
+void BleHidController::setLeftStick(int16_t lx, int16_t ly) {
+    if (!_deviceConnected || _gpInputReport == nullptr) return;
+    _gpState.leftX = lx;
+    _gpState.leftY = ly;
+    sendGamepadState();
+}
+
+void BleHidController::sendGamepad(uint16_t buttons, uint8_t dpad, int16_t lx, int16_t ly, int16_t rx, int16_t ry, uint16_t lt, uint16_t rt) {
+    if (!_deviceConnected || _gpInputReport == nullptr) return;
+
+    _gpState.buttons = buttons;
+    _gpState.dpad    = (dpad & 0x0F);
+    _gpState.leftX   = lx;
+    _gpState.leftY   = ly;
+    _gpState.rightX  = rx;
+    _gpState.rightY  = ry;
+    _gpState.lt      = lt;
+    _gpState.rt      = rt;
+
+    sendGamepadState();
+}

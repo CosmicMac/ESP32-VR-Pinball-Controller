@@ -1,49 +1,51 @@
 # ESP32 VR Pinball Controller
 
-A Bluetooth Low Energy (BLE) HID controller for VR pinball on Meta Quest, powered by an ESP32 and an MPU6050 sensor for realistic nudging.  
-The controller features two runtime modes for compatibility across different titles:
+A Bluetooth Low Energy (BLE) composite HID controller for VR pinball, with MPU6050 sensor for realistic nudging.
 
-- BLE keyboard mode: **Pinball FX VR**
-- BLE gamepad mode: **Pinball VR Classic**
-
-Successfully tested on Quest 3 and should work with PCVR pinball games with minor adjustments.
-
+![VR Pinball controller](assets/vrpc.jpg)
 Literally a game changer! :star_struck:
 
-> ## Table of Contents
->
-> - [Features](#features)
-> - [Hardware Requirements](#hardware-requirements)
-> - [Installation](#installation-with-arduino-ide)
-> - [Usage](#usage)
-> - [Troubleshooting](#troubleshooting)
-> - [License](#license)
+Keyboard or gamepad mode for compatibility across different games:
+
+- Pinball FX VR (Meta Quest)
+- Pinball VR Classic (Meta Quest)
+- Visual Pinball X (PC)
+
+Easily adaptable to other games (as long as they support keyboard or gamepad input).
+
+## Table of Contents
+
+- [Features](#features)
+- [Hardware Requirements](#hardware-requirements)
+- [Installation](#installation-with-arduino-ide)
+- [Usage](#usage)
+- [Troubleshooting](#troubleshooting)
+- [Change Log](#change-log)
+- [License](#license)
 
 ## Features
 
-- BLE HID communication using the [SQUIDHID](https://github.com/gargum/SQUIDHID) library (great lib, thanks @gargum)
-- Debounced button handling with `INPUT_PULLUP` wiring (pressed state = `LOW`)
-- Runtime mode switching via long press of **`Select` + `Start`** buttons
-- MPU6050 motion interrupt-based nudge detection with direction analysis
-- Configurable button mappings for both keyboard and gamepad modes
+- Composite BLE HID communication (keyboard + gamepad), now without relying on an external HID library
+- 11 buttons (Select, Start, Launch, A, B, X, Y, Left flipper, Left magnasave, Right flipper, Right magnasave)
+- 4 D-pad input (to navigate in Pinball VR Classic menu)
+- 1 dedicated button for mode cycling (FX, Classic, VPX)
+- Nudge detection with direction analysis (MPU6050)
 - Optional RGB LED status indicator (when `RGB_BUILTIN` is available)
 
 ## Hardware Requirements
 
-![VR Pinball controller](assets/vrpc.jpg)
-The lockbar is a genuine original Bally. :smile:
-
 ### Main Components
 
-- **ESP32-S3** development board (other ESP32 variants should work too, provided they have BLE and enough GPIO pins)
+- **ESP32-S3** development board (other ESP32 variants with BLE should work too, provided they have enough GPIO pins)
 - **MPU6050** 6-axis accelerometer/gyroscope module (I²C interface)
-- **11 momentary push buttons**, (actually less are required for FX & Classic, but this is for future proofing and custom mapping support with PCVR games)
+- **11 momentary push buttons** (fewer are required if you intend to use only FX & Classic)
 
 > [!TIP]
 > GoldLeaf Pushbuttons from Ultimarc are great for this purpose.
- 
-- **Arcade joystick** for D-pad input (optional, can be replaced with 4 buttons, only required for VR Classic to navigate menus)
-- 5v power supply (I use a 5V power bank)
+
+- **Arcade joystick** for D-pad input (optional, can be replaced with 4 buttons, only required for Classic to navigate menus)
+- 1 additional momentary push button for mode cycling (FX, Classic, VPX)
+- 5V power supply (I use a 5V power bank)
 
 ### Wiring
 
@@ -54,36 +56,37 @@ The lockbar is a genuine original Bally. :smile:
 > The module must be oriented with the components facing up and the connectors on the
 > player's side (VCC pin on the left and interrupt pin on the right).
 
-| MPU6050 Pin | ESP32   | Description          |
-|-------------|---------|----------------------|
-| VCC         | 3.3V    | Power supply         |
-| GND         | GND     | Ground               |
-| SDA         | GPIO 8  | I²C data line        |
-| SCL         | GPIO 9  | I²C clock line       |
-| INT         | GPIO 10 | Motion interrupt pin |
+| MPU6050 pin | ESP32 pin | Description          |
+|-------------|-----------|----------------------|
+| VCC         | 3.3V      | Power supply         |
+| GND         | GND       | Ground               |
+| SDA         | GPIO 8    | I²C data line        |
+| SCL         | GPIO 9    | I²C clock line       |
+| INT         | GPIO 10   | Motion interrupt pin |
 
 #### Button Connections
 
-All buttons use `INPUT_PULLUP` mode.   
-Connect one side to the specified GPIO and the other side to GND.
+> [!IMPORTANT]
+> Connect one leg of each button to the specified GPIO pin and the other leg to GND.
 
-| Function       | GPIO | Description          |
-|----------------|------|----------------------|
-| Select         | 1    | Select button        |
-| Start          | 2    | Start button         |
-| Launch         | 4    | Ball launch button   |
-| A              | 5    | Action button A      |
-| B              | 6    | Action button B      |
-| X              | 7    | Action button X      |
-| Y              | 15   | Action button Y      |
-| L1             | 42   | Left flipper         |
-| L2             | 41   | Left "magna save"    |
-| R1             | 16   | Right flipper        |
-| R2             | 17   | Right "magna save"   |
-| Joystick Left  | 37   | D-pad/joystick left  |
-| Joystick Right | 38   | D-pad/joystick right |
-| Joystick Up    | 39   | D-pad/joystick up    |
-| Joystick Down  | 40   | D-pad/joystick down  |
+| Button          | GPIO pin |
+|-----------------|----------|
+| Select          | 1        |
+| Start           | 2        |
+| Launch          | 4        |
+| Action A        | 5        |
+| Action B        | 6        |
+| Action X        | 7        |
+| Action Y        | 15       |
+| Left flipper    | 42       |
+| Left magnasave  | 41       |
+| Right flipper   | 16       |
+| Right magnasave | 17       |
+| D-pad left      | 37       |
+| D-pad right     | 38       |
+| D-pad up        | 39       |
+| D-pad down      | 40       |
+| Change mode     | 21       |
 
 ## Installation with Arduino IDE
 
@@ -94,7 +97,7 @@ Connect one side to the specified GPIO and the other side to GND.
 - See https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html#board-manager-settings
 
 > [!CAUTION]
-> At the time of writing, the `3.3.7` version seems incompatible with the BLE library.
+> At the time of writing, ESP32 3.3.7 version seems incompatible with the NimBLE-Arduino library.
 
 ### Libraries
 
@@ -110,11 +113,16 @@ Connect one side to the specified GPIO and the other side to GND.
 - Click "Filter your search" and type "MPU6050 cats".
 - Select version `1.4.4` and click the "Install" button.
 
-#### SquidHID library *by gargum*
+### Compilation and Upload
 
-- In you browser, go to https://github.com/gargum/SQUIDHID
-- Download the .ZIP file of this repo.
-- In the Arduino IDE go to "Sketch" -> "Include Library" -> "Add .ZIP Library..." and select the file you just downloaded.
+1. Open the project folder in Arduino IDE
+2. Select the ESP32 board (e.g. "ESP32-S3 Dev Module")
+3. Select the correct serial port (e.g. COM3)
+4. Click "Upload"
+
+> [!TIP]
+> Or you can use `arduino-cli` and an IDE like CLion (free for personal use).
+> `CMakeLists.txt` is provided for this purpose.
 
 ## Usage
 
@@ -126,22 +134,26 @@ Connect one side to the specified GPIO and the other side to GND.
 
 ### Mode Switching
 
-Hold **Select + Start** simultaneously for 2 seconds to toggle between modes:
+Hold the "Change mode" button to cycle between modes:
 
-- FX Mode (keyboard): RGB LED = Blue (like in key**B**oard)
-- Classic Mode (gamepad): RGB LED = Green (like in **G**amepad)
+- FX Mode (keyboard): RGB LED = Blue (like in key[B]oard)
+- Classic Mode (gamepad): RGB LED = Green (like in [G]amepad)
+- VPX Mode (keyboard): RGB LED = Purple (like in v[P]x)
 
-A 6 seconds cooldown prevents accidental mode switching.
+Mode is saved in EEPROM, so it will be restored on next boot.
 
 ### Nudge Detection
 
-1. The MPU6050 detects table nudges via motion interrupt:
+The MPU6050 detects table nudges via motion interrupt:
+
 1. Motion exceeds threshold → interrupt triggered
-1. Controller samples accelerometer 10 times
-1. Dominant axis determines nudge direction (up/down/left/right)
-1. **FX Mode:** Sends corresponding keyboard key
-1. **Classic Mode:** Deflects left analog stick to full scale
-1. After 100ms, input returns to neutral
+2. Controller samples accelerometer 5 times
+3. Dominant axis determines nudge direction (left/right/forward)
+4. Controller sends nudge command to the game based on current mode
+    - **FX and VPX modes** → keyboard key
+    - **Classic mode:** → analog stick position
+5. Game interprets nudge command and applies appropriate in-game effect
+6. After 50ms, the input returns to neutral
 
 ## Troubleshooting
 
@@ -161,7 +173,7 @@ A 6 seconds cooldown prevents accidental mode switching.
 
 - Verify that Bluetooth is enabled on your host device (Quest or PC)
 - Check that device "VR Pinball controller" appears in Bluetooth settings
-- Remove previously paired and restart host device
+- Remove the previously paired device and restart Bluetooth on the host
 - Restart ESP32 and retry pairing
 
 ### MPU6050 Not Detected
@@ -173,8 +185,16 @@ A 6 seconds cooldown prevents accidental mode switching.
 ### Nudge Not Working Correctly
 
 - Ensure MPU_INT_PIN wiring is correct
-- Verify MPU6050 orientation matches documentation
-- Adjust MOTION_DETECTION_THRESHOLD in code if too sensitive or insensitive
+- Verify MPU6050 orientation matches the [documentation](#ic-connection-mpu6050).
+- Adjust MOTION_DETECTION_THRESHOLD in `config.h` if too sensitive or insensitive
+
+## Change Log
+
+- 2026-02-28
+    - Major code refactoring to get rid of the external HID library
+    - Added support for VPX
+- 2026-02-14
+    - Initial release
 
 ## License
 

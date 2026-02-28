@@ -1,385 +1,203 @@
 #include <Arduino.h>
-#include <SQUIDHID.h>
+#include <Preferences.h>
 #include <MPU6050.h>
+#include "BleHidController.h"
+#include "ESP32_VR_Pinball_Controller.h"
+#include "config.h"
+
 
 // ###########################################################################
-//  CONFIGURATION
-// ###########################################################################
-
-constexpr auto DEVICE_NAME           = "VR Pinball controller"; // BLE device name
-constexpr auto DEVICE_MANUFACTURER   = "CosmicMac";             // BLE device manufacturer
-constexpr uint8_t BTN_DEBOUNCE_MS    = 10;                      // Debounce delay for buttons in ms
-constexpr uint16_t MODE_HOLD_TIME_MS = 2000;                    // Time in ms to hold the Select + Start buttons to switch mode between FX and Classic
-
-// MPU (nudge detection)
-constexpr uint8_t ACCEL_RANGE                = MPU6050_ACCEL_FS_2;  // Accelerometer range (±2g)
-constexpr uint8_t DLPF_MODE                  = MPU6050_DLPF_BW_188; // Digital low-pass filter configuration (from 5 to 256 Hz, the fastest the noisiest)
-constexpr uint8_t MOTION_DETECTION_THRESHOLD = 4;                   // Motion detection threshold in MPU6050 units
-constexpr uint32_t COOLDOWN_MS               = 200;                 // Delay between two motion detections
-constexpr uint32_t NUDGE_RESET_MS            = 50;                  // Time to reset nudge to center
-constexpr uint8_t NUDGE_SAMPLES              = 10;                  // Number of samples to average for nudge detection
-constexpr uint8_t MPU6050_ADDR               = 0x68;                // MPU6050 I2C address
-constexpr uint8_t ACCEL_XOUT_H               = 0x3B;                // MPU6050 register address for accelerometer X-axis high byte
-
-// GPIO pins
-constexpr uint8_t BTN_SELECT_PIN     = 1;  // Button select
-constexpr uint8_t BTN_START_PIN      = 2;  // Button start
-constexpr uint8_t BTN_LAUNCH_PIN     = 4;  // Button Launch ball
-constexpr uint8_t BTN_A_PIN          = 5;  // Button A
-constexpr uint8_t BTN_B_PIN          = 6;  // Button B
-constexpr uint8_t BTN_X_PIN          = 7;  // Button X
-constexpr uint8_t BTN_Y_PIN          = 15; // Button Y
-constexpr uint8_t BTN_L1_PIN         = 42; // Button left flipper
-constexpr uint8_t BTN_L2_PIN         = 41; // Button left Magna Save
-constexpr uint8_t BTN_R1_PIN         = 16; // Button right flipper
-constexpr uint8_t BTN_R2_PIN         = 17; // Button right Magna Save
-constexpr uint8_t JOYSTICK_DOWN_PIN  = 40; // Joystick down
-constexpr uint8_t JOYSTICK_UP_PIN    = 39; // Joystick up
-constexpr uint8_t JOYSTICK_RIGHT_PIN = 38; // Joystick right
-constexpr uint8_t JOYSTICK_LEFT_PIN  = 37; // Joystick left
-constexpr uint8_t I2C_SDA_PIN        = 8;  // MPU6050 I2C SDA
-constexpr uint8_t I2C_SCL_PIN        = 9;  // MPU6050 I2C SCL
-constexpr uint8_t MPU_INT_PIN        = 10; // MPU6050 interruption
-constexpr uint8_t DEFAULT_MODE_PIN   = 21; // High = Pinball FX VR as default mode (keyboard), Low = Pinball VR Classic as default mode (gamepad)
-
-// Mapping between user actions and keyboard keys (Pinball FX VR)
-constexpr NKROKey KEY_NONE{0}; // Dummy key
-constexpr NKROKey KEY_LAUNCH_BALL   = KC_8;
-constexpr NKROKey KEY_LEFT_FLIPPER  = KC_U;
-constexpr NKROKey KEY_RIGHT_FLIPPER = KC_6;
-constexpr NKROKey KEY_PAUSE         = KC_I;
-constexpr NKROKey KEY_NUDGE_UP      = KC_A;
-constexpr NKROKey KEY_NUDGE_DOWN    = KC_S;
-constexpr NKROKey KEY_NUDGE_RIGHT   = KC_D;
-constexpr NKROKey KEY_NUDGE_LEFT    = KC_F;
-constexpr NKROKey KEY_MAGNA_SAVE    = KC_8; // idem KEY_LAUNCH_BALL
-constexpr NKROKey KEY_POWER_UP      = KC_5;
-
-// Mapping between user actions and gamepad buttons (Pinball VR Classic)
-constexpr GamepadButton GAMEPAD_NONE{0};               // Dummy button
-constexpr GamepadButton GAMEPAD_BTN_SELECT    = GB_BA; // Back
-constexpr GamepadButton GAMEPAD_BTN_START     = GB_ST; // Start
-constexpr GamepadButton GAMEPAD_LAUNCH_BALL   = GB_WE; // X
-constexpr GamepadButton GAMEPAD_LEFT_FLIPPER  = GB_L1; // Trigger 1 left
-constexpr GamepadButton GAMEPAD_RIGHT_FLIPPER = GB_R1; // Trigger 1 right
-constexpr GamepadButton GAMEPAD_BTN_A         = GB_SO; // A
-constexpr GamepadButton GAMEPAD_BTN_B         = GB_EA; // B
-constexpr GamepadButton GAMEPAD_BTN_X         = GB_WE; // X
-constexpr GamepadButton GAMEPAD_BTN_Y         = GB_NO; // Y
-constexpr GamepadButton GAMEPAD_BTN_UP        = GB_UP; // Up
-constexpr GamepadButton GAMEPAD_BTN_DOWN      = GB_DO; // Down
-constexpr GamepadButton GAMEPAD_BTN_LEFT      = GB_LE; // Left
-constexpr GamepadButton GAMEPAD_BTN_RIGHT     = GB_RI; // Right
-
 // Array of button configurations
-constexpr uint8_t NUM_BUTTONS = 15;
-
-struct ButtonInfo
-{
-    uint8_t pin;                    // GPIO pin number for the button
-    GamepadButton button;           // Associated gamepad button mapping
-    NKROKey key;                    // Associated keyboard key mapping
-    int state;                      // Current debounced state (HIGH or LOW)
-    unsigned long lastDebounceTime; // Timestamp of the last debounce event (in ms)
-};
-
-//@formatter:off
-ButtonInfo buttons[NUM_BUTTONS] = {
-//                          Classic                 FX
-//   Button pin             Gamepad button          Keyboard key        State   Debounce time
-    {BTN_LAUNCH_PIN,        GAMEPAD_LAUNCH_BALL,    KEY_LAUNCH_BALL,    HIGH,   0},
-    {BTN_A_PIN,             GAMEPAD_BTN_A,          KEY_LAUNCH_BALL,    HIGH,   0},
-    {BTN_B_PIN,             GAMEPAD_BTN_B,          KEY_POWER_UP,       HIGH,   0},
-    {BTN_X_PIN,             GAMEPAD_BTN_X,          KEY_PAUSE,          HIGH,   0},
-    {BTN_Y_PIN,             GAMEPAD_BTN_Y,          KEY_PAUSE,          HIGH,   0},
-    {BTN_SELECT_PIN,        GAMEPAD_BTN_SELECT,     KEY_PAUSE,          HIGH,   0},
-    {BTN_START_PIN,         GAMEPAD_BTN_START,      KEY_PAUSE,          HIGH,   0},
-    {BTN_L1_PIN,            GAMEPAD_LEFT_FLIPPER,   KEY_LEFT_FLIPPER,   HIGH,   0},
-    {BTN_R1_PIN,            GAMEPAD_RIGHT_FLIPPER,  KEY_RIGHT_FLIPPER,  HIGH,   0},
-    {BTN_L2_PIN,            GAMEPAD_NONE,           KEY_MAGNA_SAVE,     HIGH,   0},
-    {BTN_R2_PIN,            GAMEPAD_NONE,           KEY_MAGNA_SAVE,     HIGH,   0},
-    {JOYSTICK_LEFT_PIN,     GAMEPAD_BTN_LEFT,       KEY_NUDGE_LEFT,     HIGH,   0},
-    {JOYSTICK_RIGHT_PIN,    GAMEPAD_BTN_RIGHT,      KEY_NUDGE_RIGHT,    HIGH,   0},
-    {JOYSTICK_UP_PIN,       GAMEPAD_BTN_UP,         KEY_NUDGE_UP,       HIGH,   0},
-    {JOYSTICK_DOWN_PIN,     GAMEPAD_BTN_DOWN,       KEY_NUDGE_DOWN,     HIGH,   0},
-};
-//@formatter:on
-
 // ###########################################################################
-
-
-// ENUMS
-
-// Controller mode: Pinball VR Classic (gamepad controller) or Pinball FX VR (keyboard controller)
-enum class ControllerMode : uint8_t { UNDEFINED, CLASSIC, FX };
-
-// LED states for RGB indication
-enum class LedState : uint8_t { OFF, INITIALIZATION, FX_MODE_ACTIVE, CLASSIC_MODE_ACTIVE };
-
-
-// GLOBAL VARIABLES
+constexpr uint8_t NUM_BUTTONS   = 15;
+ButtonInfo buttons[NUM_BUTTONS] = {
+    //@formatter:off
+    //                                            Classic                      FX                      VPX
+    {BTN_A_PIN,               ButtonType::BUTTON, ClassicBtn::A,               FxKey::A,               VpxKey::A,               HIGH, 0},
+    {BTN_B_PIN,               ButtonType::BUTTON, ClassicBtn::B,               FxKey::B,               VpxKey::B,               HIGH, 0},
+    {BTN_X_PIN,               ButtonType::BUTTON, ClassicBtn::X,               FxKey::X,               VpxKey::X,               HIGH, 0},
+    {BTN_Y_PIN,               ButtonType::BUTTON, ClassicBtn::Y,               FxKey::Y,               VpxKey::Y,               HIGH, 0},
+    {BTN_SELECT_PIN,          ButtonType::BUTTON, ClassicBtn::SELECT,          FxKey::SELECT,          VpxKey::SELECT,          HIGH, 0},
+    {BTN_START_PIN,           ButtonType::BUTTON, ClassicBtn::START,           FxKey::START,           VpxKey::START,           HIGH, 0},
+    {BTN_LAUNCH_PIN,          ButtonType::BUTTON, ClassicBtn::LAUNCH,          FxKey::LAUNCH,          VpxKey::LAUNCH,          HIGH, 0},
+    {BTN_LEFT_FLIPPER_PIN,    ButtonType::BUTTON, ClassicBtn::LEFT_FLIPPER,    FxKey::LEFT_FLIPPER,    VpxKey::LEFT_FLIPPER,    HIGH, 0},
+    {BTN_RIGHT_FLIPPER_PIN,   ButtonType::BUTTON, ClassicBtn::RIGHT_FLIPPER,   FxKey::RIGHT_FLIPPER,   VpxKey::RIGHT_FLIPPER,   HIGH, 0},
+    {BTN_LEFT_MAGNASAVE_PIN,  ButtonType::BUTTON, ClassicBtn::LEFT_MAGNASAVE,  FxKey::LEFT_MAGNASAVE,  VpxKey::LEFT_MAGNASAVE,  HIGH, 0},
+    {BTN_RIGHT_MAGNASAVE_PIN, ButtonType::BUTTON, ClassicBtn::RIGHT_MAGNASAVE, FxKey::RIGHT_MAGNASAVE, VpxKey::RIGHT_MAGNASAVE, HIGH, 0},
+    {DPAD_UP_PIN,             ButtonType::DPAD,   ClassicBtn::UP,              FxKey::UP,              VpxKey::UP,              HIGH, 0},
+    {DPAD_DOWN_PIN,           ButtonType::DPAD,   ClassicBtn::DOWN,            FxKey::DOWN,            VpxKey::DOWN,            HIGH, 0},
+    {DPAD_LEFT_PIN,           ButtonType::DPAD,   ClassicBtn::LEFT,            FxKey::LEFT,            VpxKey::LEFT,            HIGH, 0},
+    {DPAD_RIGHT_PIN,          ButtonType::DPAD,   ClassicBtn::RIGHT,           FxKey::RIGHT,           VpxKey::RIGHT,           HIGH, 0},
+    //@formatter:on
+};
+static_assert(NUM_BUTTONS == std::size(buttons), "NUM_BUTTONS mismatch");
+// ###########################################################################
 
 MPU6050 mpu;
-SQUIDHID hidDevice(DEVICE_NAME, DEVICE_MANUFACTURER);
+BleHidController hid;
+Preferences config;
+NudgeState nudgeState;
+ControllerMode mode;
+
+bool configChanged             = false; // Flag to indicate if the configuration has changed and needs to be saved
+unsigned long lastConfigChange = 0;     // Timestamp of the last configuration change, used to throttle flash writes
+
+// ISR handlers
+volatile bool changeModeIRQ = false;
+static void IRAM_ATTR onChangeModeISR() { changeModeIRQ = true; }
+
 volatile bool motionIRQ = false;
-auto controllerMode     = ControllerMode::UNDEFINED;
+static void IRAM_ATTR onMotionISR() { motionIRQ = true; }
 
 
-// FUNCTION DECLARATIONS
-
-void IRAM_ATTR onMotionInterrupt();
-void setRgbLedState(LedState state);
-void calibrateSensor(uint16_t samples = 500);
-void setupAccelerometer();
-bool readAccelG(int16_t& x, int16_t& y);
-void setupHIDDevice();
-void handleButton(ButtonInfo& button);
+// Calibration results (populated by calibrateSensor, used by handleNudgeDetection) //!HERE
+int16_t accelOffsetX = 0; // Mean X at rest (raw units)
+int16_t accelOffsetY = 0; // Mean Y at rest (raw units)
+float accelSigmaX    = 0; // Standard deviation X at rest
+float accelSigmaY    = 0; // Standard deviation Y at rest
 
 void setup() {
     Serial.begin(115200);
 
-    setRgbLedState(LedState::INITIALIZATION);
+    setLedColor(LedColor::RED);
 
-    // Initialize button pins
+    // Initialize change mode button
+    pinMode(CHANGE_MODE_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(CHANGE_MODE_PIN), onChangeModeISR, RISING);
+
+    // Initialize buttons
     for (const auto& button : buttons) {
         pinMode(button.pin, INPUT_PULLUP);
     }
 
+    // Initialize HID
+    hid.begin(DEVICE_NAME, DEVICE_MANUFACTURER, 0x1234, 0x5678); //!HERE
+
     // Initialize accelerometer
     setupAccelerometer();
 
-    // Initialize HID device
-    setupHIDDevice();
-
-    // Set default controller mode
-    pinMode(DEFAULT_MODE_PIN, INPUT_PULLUP);
-    controllerMode = digitalRead(DEFAULT_MODE_PIN) == LOW ? ControllerMode::CLASSIC : ControllerMode::FX;
-    if (controllerMode == ControllerMode::CLASSIC) {
-        setRgbLedState(LedState::CLASSIC_MODE_ACTIVE);
-        Serial.println("Switched to Pinball VR Classic mode (gamepad)");
-    }
-    else {
-        setRgbLedState(LedState::FX_MODE_ACTIVE);
-        Serial.println("Switched to Pinball FX VR mode (keyboard)");
-    }
+    // Load saved mode
+    config.begin("ctrl_cfg", false);
+    const auto savedMode = static_cast<ControllerMode>(config.getUChar("mode", static_cast<uint8_t>(ControllerMode::FX)));
+    Serial.printf("[setup] Loaded mode from flash: %d\n", static_cast<int>(savedMode));
+    setMode(savedMode, true);
 }
 
 void loop() {
-    const unsigned long currentMillis = millis();
+    const auto currentMillis = millis();
 
-    // HID DEVICE HANDLER
+    // Save configuration if changed, regardless of BLE connection state
+    if (configChanged && (currentMillis - lastConfigChange > CONFIG_SAVE_INTERVAL_MS)) {
+        Serial.printf("[loop] Saving mode %d to flash...\n", mode);
+        config.putUChar("mode", static_cast<uint8_t>(mode));
+        Serial.println("[loop] Configuration saved!");
+        configChanged = false;
+    }
 
-    hidDevice.update();
-    if (!hidDevice.isConnected()) {
-        Serial.println("Waiting connection...");
+    // Check BLE connection state before processing inputs
+    static bool wasConnected = true;
+
+    if (!hid.isConnected()) {
+        if (wasConnected) {
+            wasConnected = false;
+            setLedColor(LedColor::RED);
+        }
         delay(1000);
         return;
     }
 
-    // MPU HANDLER (NUDGE DETECTION)
-
-    static unsigned long lastNudgeMillis = 0;
-    static bool isNudging                = false;
-    static NKROKey nudgeKey(0);
-
-    if (motionIRQ) {
-        motionIRQ = false;
-
-        // Read the status to clear the MPU hardware interrupt and check that it is indeed a motion detection
-        if (!(mpu.getIntStatus() & 0x40)) return;
-
-        if (currentMillis - lastNudgeMillis > COOLDOWN_MS) {
-            lastNudgeMillis = currentMillis;
-            isNudging       = true;
-
-            uint16_t absX    = 0, absY    = 0;
-            uint16_t maxAbsX = 0, maxAbsY = 0;
-            int16_t maxX     = 0, maxY    = 0;
-
-            // Loop to read accelerometer values 10 times and track the maximum absolute X and Y values
-            int16_t x, y;
-            for (int i = 0; i < static_cast<int>(NUDGE_SAMPLES); i++) {
-                if (!readAccelG(x, y)) continue;
-
-                Serial.printf("X, Y:\t\t%d\t\t%d\n", x, y);
-
-                absX = abs(x);
-                if (absX > maxAbsX) {
-                    maxAbsX = absX;
-                    maxX    = x;
-                }
-
-                absY = abs(y);
-                if (absY > maxAbsY) {
-                    maxAbsY = absY;
-                    maxY    = y;
-                }
-            }
-
-            Serial.printf("Max X/Y:\t%d\t\t%d\n", maxX, maxY);
-
-            if (abs(maxX) > abs(maxY)) {
-                if (controllerMode == ControllerMode::FX) nudgeKey = KEY_NUDGE_UP;
-                else hidDevice.setLeftStick(0, -32768);
-                Serial.println("Nudge up");
-            }
-            else {
-                int16_t nudgeY = maxY;
-                if (nudgeY > 0) {
-                    if (controllerMode == ControllerMode::FX) nudgeKey = KEY_NUDGE_LEFT;
-                    else hidDevice.setLeftStick(-32768, 0);
-                    Serial.println("Nudge left");
-                }
-                else {
-                    if (controllerMode == ControllerMode::FX) nudgeKey = KEY_NUDGE_RIGHT;
-                    else hidDevice.setLeftStick(32767, 0);
-                    Serial.println("Nudge right");
-                }
-            }
-            if (controllerMode == ControllerMode::FX) hidDevice.press(nudgeKey);
-        }
+    if (!wasConnected) {
+        // Restore LED color based on current mode when connection is established
+        wasConnected = true;
+        setLedColor(MODE_COLORS[static_cast<uint8_t>(mode)]);
     }
 
-    if (isNudging && (currentMillis - lastNudgeMillis > NUDGE_RESET_MS)) {
-        isNudging = false;
-        if (controllerMode == ControllerMode::FX) hidDevice.release(nudgeKey);
-        else hidDevice.setLeftStick(0, 0);
+    // If change mode button was pressed, cycle through modes
+    if (changeModeIRQ == true) {
+        changeModeIRQ = false;
+        setMode(static_cast<ControllerMode>((static_cast<uint8_t>(mode) + 1) % static_cast<uint8_t>(ControllerMode::count)));
     }
 
-    // CONTROLLER MODE SWITCH HANDLER
+    // Handle nudge detection from accelerometer
+    handleNudgeDetection(currentMillis);
 
-    static bool modeSwitchPending = false;
-
-    static unsigned long modeHoldStartMillis  = 0;
-    static unsigned long lastModeSwitchMillis = 0;
-
-    if (
-        currentMillis - lastModeSwitchMillis > MODE_HOLD_TIME_MS * 3 // Force a delay between 2 mode switches
-        && digitalRead(BTN_SELECT_PIN) == LOW
-        && digitalRead(BTN_START_PIN) == LOW
-    ) {
-        if (!modeSwitchPending) {
-            modeHoldStartMillis = currentMillis;
-            modeSwitchPending   = true;
-        }
-        else if (currentMillis - modeHoldStartMillis > MODE_HOLD_TIME_MS) {
-            // Change mode after long press
-            lastModeSwitchMillis = currentMillis;
-            if (controllerMode == ControllerMode::FX) {
-                controllerMode = ControllerMode::CLASSIC;
-                setRgbLedState(LedState::CLASSIC_MODE_ACTIVE);
-                Serial.println("Switched to Pinball VR Classic mode (gamepad)");
-            }
-            else {
-                controllerMode = ControllerMode::FX;
-                setRgbLedState(LedState::FX_MODE_ACTIVE);
-                Serial.println("Switched to Pinball FX VR mode (keyboard)");
-            }
-            modeSwitchPending = false; // Prevents re-switching while buttons are held down
-            delay(100);                // Anti-rebond pour éviter plusieurs changements rapides
-        }
-        return;
-    }
-    else {
-        modeSwitchPending = false;
-    }
-
-    // BUTTONS HANDLER
-
+    // Handle button states
     for (auto& button : buttons) {
-        handleButton(button);
+        handleButton(button, currentMillis);
     }
 }
 
-
 /**
- * Interrupt Service Routine triggered by motion detection
- */
-void IRAM_ATTR onMotionInterrupt() {
-    motionIRQ = true;
-}
-
-
-/**
- * Sets the RGB LED to a specific state based on the provided LedState
- * If RGB_BUILTIN is not defined, the function returns immediately
- *
- * @param state The LedState to set the RGB LED to
- */
-void setRgbLedState(const LedState state) {
-#ifndef RGB_BUILTIN
-    return;
-#endif
-
-    switch (state) {
-    case LedState::OFF:
-        rgbLedWrite(RGB_BUILTIN, 0, 0, 0);
-        break;
-    case LedState::INITIALIZATION:
-        rgbLedWrite(RGB_BUILTIN, 128, 0, 0); // Red
-        break;
-    case LedState::FX_MODE_ACTIVE:
-        rgbLedWrite(RGB_BUILTIN, 0, 0, RGB_BRIGHTNESS); // Blue, like in keyBoard
-        break;
-    case LedState::CLASSIC_MODE_ACTIVE:
-        rgbLedWrite(RGB_BUILTIN, 0, RGB_BRIGHTNESS, 0); // Green, like in Gamepad
-        break;
-    }
-}
-
-
-/**
- * Handles the debouncing and state change of a single button
- *
- * @param button Reference to the ButtonInfo struct representing the button to handle
- */
-void handleButton(ButtonInfo& button) {
-    if (!hidDevice.isConnected()) {
-        return;
-    }
-
-    if (millis() - button.lastDebounceTime < BTN_DEBOUNCE_MS) {
+* Handles the debouncing and state change of a single button
+*
+* @param button Reference to the ButtonInfo struct representing the button to handle
+* @param currentMillis Current time in milliseconds, used for debouncing logic
+*/
+void handleButton(ButtonInfo& button, const unsigned long currentMillis) {
+    if (currentMillis - button.lastDebounceTime < BTN_DEBOUNCE_MS) {
         return;
     }
 
     if (const int reading = digitalRead(button.pin); reading != button.state) {
         button.state            = reading;
-        button.lastDebounceTime = millis();
+        button.lastDebounceTime = currentMillis;
         if (button.state == LOW) {
-            if (controllerMode == ControllerMode::FX) {
-                hidDevice.press(button.key);
-            }
-            else {
-                hidDevice.press(button.button);
-            }
-            Serial.printf("Button on pin %d pressed\n", button.pin);
+            performButtonAction(getButtonAction(button, mode), true);
         }
         else {
-            if (controllerMode == ControllerMode::FX) {
-                if (button.key != KEY_NONE) hidDevice.release(button.key);
-            }
-            else {
-                if (button.button != GAMEPAD_NONE) hidDevice.release(button.button);
-            }
-            Serial.printf("Button on pin %d released\n", button.pin);
+            performButtonAction(getButtonAction(button, mode), false);
         }
     }
 }
 
-
 /**
- * Sets up the BLE gamepad with the desired configuration
+ * Controller mode change handler
+ *
+ * @param newMode The new controller mode to switch to
+ * @param initialConfig Indicates if this mode change is part of the initial configuration (true during setup) or a user-initiated change
  */
-void setupHIDDevice() {
-    Serial.println("Initializing HID device...");
-    hidDevice.setAppearance(GAMEPAD);
-    hidDevice.begin();
-    while (!hidDevice.isConnected()) {
-        Serial.println("Waiting connection...");
-        delay(1000);
+void setMode(const ControllerMode newMode, const bool initialConfig) {
+    const unsigned long currentMillis   = millis();
+    static unsigned long lastChangeTime = 0;
+    if (!initialConfig && (currentMillis - lastChangeTime < 700)) return;
+    lastChangeTime = currentMillis;
+
+    // Release all keys/buttons and reset dpad to centered before switching mode
+    if (!initialConfig) {
+        hid.keyReleaseAll();
+        hid.sendGamepad(BTN_NONE, DPAD_CENTERED, 0, 0, 0, 0);
+        Serial.println("[setMode] Releasing all keys and resetting dpad");
+    }
+    setLedColor(MODE_COLORS[static_cast<uint8_t>(newMode)]);
+
+    mode = newMode;
+    Serial.printf("[setMode] mode set to %d (initialConfig=%d)\n", static_cast<int>(mode), static_cast<int>(initialConfig));
+    if (!initialConfig) {
+        configChanged    = true;
+        lastConfigChange = currentMillis;
     }
 }
 
+void setLedColor(const LedColor color) {
+#ifdef RGB_BUILTIN
+    switch (color) {
+        //@formatter:off
+        case LedColor::OFF:             rgbLedWrite(RGB_BUILTIN, 0, 0, 0); break;
+        case LedColor::RED:             rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0); break;
+        case LedColor::CLASSIC_MODE:
+        case LedColor::GREEN:           rgbLedWrite(RGB_BUILTIN, 0, RGB_BRIGHTNESS, 0); break;
+        case LedColor::FX_MODE:
+        case LedColor::BLUE:            rgbLedWrite(RGB_BUILTIN, 0, 0, RGB_BRIGHTNESS); break;
+        case LedColor::YELLOW:          rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, RGB_BRIGHTNESS, 0); break;
+        case LedColor::VPX_MODE:
+        case LedColor::PURPLE:          rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, RGB_BRIGHTNESS); break;
+        case LedColor::CYAN:            rgbLedWrite(RGB_BUILTIN, 0, RGB_BRIGHTNESS, RGB_BRIGHTNESS); break;
+        case LedColor::WHITE:           rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, RGB_BRIGHTNESS, RGB_BRIGHTNESS); break;
+        default: break;
+        //@formatter:on
+    }
+#endif
+}
 
 /**
  * Initializes the MPU6050 accelerometer and configures its settings
@@ -402,7 +220,7 @@ void setupAccelerometer() {
     mpu.setIntMotionEnabled(true);
 
     pinMode(MPU_INT_PIN, INPUT);
-    attachInterrupt(digitalPinToInterrupt(MPU_INT_PIN), onMotionInterrupt, RISING);
+    attachInterrupt(digitalPinToInterrupt(MPU_INT_PIN), onMotionISR, RISING);
 
     calibrateSensor();
 }
@@ -429,7 +247,7 @@ void calibrateSensor(const uint16_t samples) {
         sx += x;
         sy += y;
 
-        sx2 += static_cast<float>(x) * x; // Cast to float to avoid int16 overflow
+        sx2 += static_cast<float>(x) * x;
         sy2 += static_cast<float>(y) * y;
 
         validSamples++;
@@ -441,15 +259,25 @@ void calibrateSensor(const uint16_t samples) {
         Serial.println("Calibration failed: no valid samples!");
         return;
     }
+
     const float meanX = sx / validSamples;
     const float meanY = sy / validSamples;
 
-    const float sigmaX = sqrtf(sx2 / validSamples - meanX * meanX);
-    const float sigmaY = sqrtf(sy2 / validSamples - meanY * meanY);
+    const float varX = sx2 / validSamples - meanX * meanX;
+    const float varY = sy2 / validSamples - meanY * meanY;
 
-    Serial.printf("Calibration done (%d samples)!", validSamples);
-    Serial.printf("Mean X/Y:\t\t%f\t\t%f", meanX, meanY);
-    Serial.printf("Sigma X/Y:\t\t%f\t\t%f", sigmaX, sigmaY);
+    const float sigmaX = sqrtf(fmaxf(varX, 0.0f));
+    const float sigmaY = sqrtf(fmaxf(varY, 0.0f));
+
+    // Store calibration results for use in handleNudgeDetection
+    accelOffsetX = static_cast<int16_t>(meanX);
+    accelOffsetY = static_cast<int16_t>(meanY);
+    accelSigmaX  = sigmaX;
+    accelSigmaY  = sigmaY;
+
+    Serial.printf("Calibration done (%d samples)!\n", validSamples);
+    Serial.printf("Mean X/Y:\t\t%f\t\t%f\n", meanX, meanY);
+    Serial.printf("Sigma X/Y:\t\t%f\t\t%f\n", sigmaX, sigmaY);
 }
 
 
@@ -474,4 +302,142 @@ bool readAccelG(int16_t& x, int16_t& y) {
     x = static_cast<int16_t>((xh << 8) | xl);
     y = static_cast<int16_t>((yh << 8) | yl);
     return true;
+}
+
+/**
+ * Reads multiple accelerometer samples and returns the peak X and Y values
+ *
+ * @return The peak X and Y values
+ */
+AccelPeak getAccelPeak() {
+    int16_t x, y, maxX = 0, maxY    = 0;
+    uint16_t maxAbsX   = 0, maxAbsY = 0;
+    for (int i = 0; i < static_cast<int>(NUDGE_SAMPLES); i++) {
+        if (!readAccelG(x, y)) continue;
+        x -= accelOffsetX;
+        y -= accelOffsetY;
+        if (const uint16_t ax = abs(x); ax > maxAbsX) {
+            maxAbsX = ax;
+            maxX    = x;
+        }
+        if (const uint16_t ay = abs(y); ay > maxAbsY) {
+            maxAbsY = ay;
+            maxY    = y;
+        }
+    }
+    return {maxX, maxY};
+}
+
+void handleNudgeDetection(const unsigned long currentMillis) {
+    if (motionIRQ) {
+        motionIRQ = false;
+
+        // Read the status to clear the MPU hardware interrupt and check that it is indeed a motion detection
+        if (!(mpu.getIntStatus() & 0x40)) return;
+
+        if (currentMillis - nudgeState.lastNudgeMillis > COOLDOWN_MS) {
+            nudgeState.lastNudgeMillis = currentMillis;
+            nudgeState.isNudging       = true;
+            AccelPeak peak             = getAccelPeak();
+            Serial.printf("Max X/Y:\t%d\t\t%d\n", peak.x, peak.y);
+
+            nudgeState.nudgeKey = 0;
+
+#if 0
+            // Ignore movements that are within sensor noise (3-sigma threshold)
+            const float noiseThreshX = 3.0f * accelSigmaX;
+            const float noiseThreshY = 3.0f * accelSigmaY;
+
+            if (abs(maxX) < noiseThreshX && abs(maxY) < noiseThreshY) {
+                Serial.println("Motion below noise threshold, ignoring");
+                nudgeState.isNudging = false;
+            }
+            else
+#endif
+
+            if (abs(peak.x) > abs(peak.y)) {
+                switch (mode) {
+                    //@formatter:off
+                    case ControllerMode::FX:      nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD); break;
+                    case ControllerMode::VPX:     nudgeState.nudgeKey = static_cast<uint8_t>(VpxNudgeKey::FORWARD); break;
+                    case ControllerMode::CLASSIC: hid.setLeftStick(0, INT16_MAX); break;
+                    default: break;
+                    //@formatter:on
+                }
+                Serial.println("Nudge up");
+            }
+            else {
+                int16_t nudgeY = peak.y;
+                if (nudgeY > 0) {
+                    switch (mode) {
+                        //@formatter:off
+                        case ControllerMode::FX:      nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::LEFT); break;
+                        case ControllerMode::VPX:     nudgeState.nudgeKey = static_cast<uint8_t>(VpxNudgeKey::LEFT); break;
+                        case ControllerMode::CLASSIC: hid.setLeftStick(INT16_MAX, 0); break;
+                        default: break;
+                        //@formatter:on
+                    }
+                    Serial.println("Nudge left");
+                }
+                else {
+                    switch (mode) {
+                        //@formatter:off
+                        case ControllerMode::FX:      nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::RIGHT); break;
+                        case ControllerMode::VPX:     nudgeState.nudgeKey = static_cast<uint8_t>(VpxNudgeKey::RIGHT); break;
+                        case ControllerMode::CLASSIC: hid.setLeftStick(INT16_MIN, 0); break;
+                        default: break;
+                        //@formatter:on
+                    }
+                    Serial.println("Nudge right");
+                }
+            }
+            if (nudgeState.nudgeKey != 0) hid.keyPress(nudgeState.nudgeKey);
+        }
+    }
+
+    else if (nudgeState.isNudging && (currentMillis - nudgeState.lastNudgeMillis > NUDGE_RESET_MS)) {
+        nudgeState.isNudging = false;
+        if (nudgeState.nudgeKey != 0) {
+            hid.keyRelease(nudgeState.nudgeKey);
+            nudgeState.nudgeKey = 0;
+        }
+        else hid.setLeftStick(0, 0);
+    }
+}
+
+
+void performButtonAction(const ButtonAction& action, bool isPressed) {
+    switch (action.type) {
+        //@formatter:off
+        case ActionType::KEYBOARD_KEY:
+            if (isPressed)                  hid.keyPress(action.keyCode);
+            else                            hid.keyRelease(action.keyCode);
+            break;
+        case ActionType::GAMEPAD_BUTTON:
+            if (isPressed)                  hid.buttonPress(action.buttonCode);
+            else                            hid.buttonRelease(action.buttonCode);
+            break;
+        case ActionType::GAMEPAD_DPAD:
+            if (isPressed)                  hid.dpadPress(action.dpadValue);
+            else                            hid.dpadRelease();
+            break;
+
+        case ActionType::NONE:
+        default:
+            break;
+        //@formatter:on
+    }
+}
+
+ButtonAction getButtonAction(const ButtonInfo& button, ControllerMode mode) {
+    switch (mode) {
+        //@formatter:off
+        case ControllerMode::FX:                    return {.type = ActionType::KEYBOARD_KEY, .keyCode = static_cast<uint8_t>(button.fxKey)};
+        case ControllerMode::VPX:                   return {.type = ActionType::KEYBOARD_KEY, .keyCode = static_cast<uint8_t>(button.vpxKey)};
+        case ControllerMode::CLASSIC:
+            if (button.type == ButtonType::DPAD)    return {.type = ActionType::GAMEPAD_DPAD, .dpadValue = static_cast<uint8_t>(button.classicCode)};
+            else                                    return {.type = ActionType::GAMEPAD_BUTTON, .buttonCode = static_cast<uint16_t>(button.classicCode)};
+        default:                                    return {.type = ActionType::NONE};
+        //@formatter:on
+    }
 }
