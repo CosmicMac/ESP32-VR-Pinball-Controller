@@ -360,7 +360,7 @@ void handleNudgeDetection(const unsigned long currentMillis) {
                     //@formatter:off
                     case ControllerMode::FX:      nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD); break;
                     case ControllerMode::VPX:     nudgeState.nudgeKey = static_cast<uint8_t>(VpxNudgeKey::FORWARD); break;
-                    case ControllerMode::CLASSIC: hid.setLeftStick(0, INT16_MAX); break;
+                    case ControllerMode::CLASSIC: hid.setLeftStick(0, INT16_MIN); break;
                     default: break;
                     //@formatter:on
                 }
