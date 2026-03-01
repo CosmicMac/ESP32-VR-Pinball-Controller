@@ -193,6 +193,8 @@ The MPU6050 detects table nudges via motion interrupt:
 - 2026-02-28
     - Major code refactoring to get rid of the external HID library
     - Added support for VPX
+    - Added dedicated button for mode cycling
+
 - 2026-02-14
     - Initial release
 
