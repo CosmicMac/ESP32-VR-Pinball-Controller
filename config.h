@@ -93,10 +93,10 @@ enum class FxKey : uint8_t
 // VPX keys
 enum class VpxKey : uint8_t
 {
-    A               = KEY_P,
-    B               = KEY_P,
-    X               = KEY_P,
-    Y               = KEY_P,
+    A               = KEY_ESC,              // Pause game and display VR launcher
+    B               = KEY_KP8,              // Numpad 8: recenter view in VR
+    X               = KEY_KP2,              // Numpad 2: lower table in VR
+    Y               = KEY_KP5,              // Numpad 5: upper table in VR
     SELECT          = KEY_5,
     START           = KEY_1,
     LAUNCH          = KEY_ENTER,
@@ -104,10 +104,10 @@ enum class VpxKey : uint8_t
     RIGHT_FLIPPER   = KEY_RIGHT_SHIFT,
     LEFT_MAGNASAVE  = KEY_LEFT_CTRL,
     RIGHT_MAGNASAVE = KEY_RIGHT_CTRL,
-    UP              = KEY_NONE,
-    DOWN            = KEY_NONE,
-    LEFT            = KEY_NONE,
-    RIGHT           = KEY_NONE,
+    UP              = KEY_LEFT_SHIFT,       // Navigate in VR launcher menu
+    DOWN            = KEY_RIGHT_SHIFT,      // ...
+    LEFT            = KEY_LEFT_CTRL,        // ...
+    RIGHT           = KEY_RIGHT_CTRL,       // ...
 };
 
 
