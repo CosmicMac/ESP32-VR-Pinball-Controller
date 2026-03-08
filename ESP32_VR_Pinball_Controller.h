@@ -55,13 +55,15 @@ struct AccelPeak
 };
 
 // Function declarations
-void handleButton(ButtonInfo& button, unsigned long currentMillis);
+void handleButton(ButtonInfo& button);
 void setMode(ControllerMode newMode, bool initialConfig = false);
 void setLedColor(LedColor color);
 void setupAccelerometer();
-bool readAccelG(int16_t& x, int16_t& y);
+bool readAccelRaw(int16_t& x, int16_t& y);
 AccelPeak getAccelPeak();
 void calibrateSensor(uint16_t samples = 500);
-void handleNudgeDetection(unsigned long currentMillis);
+void handleAnalogNudge();
+void handleAnalogNudgeVelocity();
+void handleDigitalNudge();
 void performButtonAction(const ButtonAction& action, bool isPressed);
 ButtonAction getButtonAction(const ButtonInfo& button, ControllerMode mode);

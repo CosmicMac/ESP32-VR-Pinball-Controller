@@ -36,10 +36,10 @@ constexpr uint8_t MPU_INT_PIN = 10; // MPU6050 interrupt pin
 // #########################################################
 // MPU6050 parameters
 // #########################################################
+constexpr uint16_t SENSOR_ROTATION           = 90;                  // Rotation of the sensor on the horizontal plane (0, 90, 180, 270 degrees clockwise) ---
 constexpr uint8_t MPU6050_ADDR               = 0x68;                // MPU6050 I2C address
 constexpr uint8_t ACCEL_RANGE                = MPU6050_ACCEL_FS_2;  // Accelerometer range (±2g)
 constexpr uint8_t DLPF_MODE                  = MPU6050_DLPF_BW_188; // Digital low-pass filter configuration (from 5 to 256 Hz, the fastest the noisiest), default : MPU6050_DLPF_BW_188
-constexpr uint8_t MOTION_DETECTION_THRESHOLD = 4;                   // Motion detection threshold in MPU6050 units, default: 4
 constexpr uint32_t COOLDOWN_MS               = 200;                 // Delay between two motion detections
 constexpr uint32_t NUDGE_RESET_MS            = 50;                  // Time to reset nudge to center
 constexpr uint8_t NUDGE_SAMPLES              = 5;                   // Number of samples to average for nudge detection
@@ -93,10 +93,10 @@ enum class FxKey : uint8_t
 // VPX keys
 enum class VpxKey : uint8_t
 {
-    A               = KEY_ESC,              // Pause game and display VR launcher
-    B               = KEY_KP8,              // Numpad 8: recenter view in VR
-    X               = KEY_KP2,              // Numpad 2: lower table in VR
-    Y               = KEY_KP5,              // Numpad 5: upper table in VR
+    A               = KEY_ESC, // Pause game and display VR launcher
+    B               = KEY_KP8, // Numpad 8: recenter view in VR
+    X               = KEY_KP2, // Numpad 2: lower table in VR
+    Y               = KEY_KP5, // Numpad 5: upper table in VR
     SELECT          = KEY_5,
     START           = KEY_1,
     LAUNCH          = KEY_ENTER,
@@ -104,10 +104,10 @@ enum class VpxKey : uint8_t
     RIGHT_FLIPPER   = KEY_RIGHT_SHIFT,
     LEFT_MAGNASAVE  = KEY_LEFT_CTRL,
     RIGHT_MAGNASAVE = KEY_RIGHT_CTRL,
-    UP              = KEY_LEFT_SHIFT,       // Navigate in VR launcher menu
-    DOWN            = KEY_RIGHT_SHIFT,      // ...
-    LEFT            = KEY_LEFT_CTRL,        // ...
-    RIGHT           = KEY_RIGHT_CTRL,       // ...
+    UP              = KEY_LEFT_SHIFT,  // Navigate in VR launcher menu
+    DOWN            = KEY_RIGHT_SHIFT, // ...
+    LEFT            = KEY_LEFT_CTRL,   // ...
+    RIGHT           = KEY_RIGHT_CTRL,  // ...
 };
 
 
@@ -139,3 +139,4 @@ constexpr auto DEVICE_NAME                 = "VR Pinball controller"; // BLE dev
 constexpr auto DEVICE_MANUFACTURER         = "CosmicMac";             // BLE device manufacturer
 constexpr uint8_t BTN_DEBOUNCE_MS          = 10;                      // Debounce delay for buttons in ms
 constexpr uint16_t CONFIG_SAVE_INTERVAL_MS = 5000;                    // Interval to save configuration to flash in ms
+
