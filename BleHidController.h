@@ -194,6 +194,7 @@ public:
     void dpadPress(uint8_t dpad);
     void dpadRelease();
     void setLeftStick(int16_t lx, int16_t ly);
+    void setRightStick(int16_t rx, int16_t ry);
 
 private:
     void sendGamepadState();

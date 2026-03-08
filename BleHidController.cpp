@@ -65,8 +65,8 @@ static const uint8_t hidReportMapData[] = {
     // Joysticks
     0x09, 0x30,               // Usage Left X
     0x09, 0x31,               // Usage Left Y
-    0x09, 0x33,               // Usage Right X
-    0x09, 0x34,               // Usage Right Y
+    0x09, 0x32,               // Usage Right X (Z)
+    0x09, 0x35,               // Usage Right Y (Rz)
     0x16, 0x00, 0x80,         // Logical Min 0x8000 (-32768)
     0x26, 0xFF, 0x7F,         // Logical Max 0x7FFF (32767)
     0x75, 0x10,               // Report Size 16 bits
@@ -141,7 +141,7 @@ void BleHidController::begin(const char* deviceName, const char* deviceManufactu
     adv->setName(deviceName);
     adv->addServiceUUID(_hidDevice->getHidService()->getUUID());
     adv->addServiceUUID(_hidDevice->getBatteryService()->getUUID());
-    adv->setAppearance(HID_KEYBOARD); // Or GENERIC_HID as Meta Quest 3 doesn't seem to accept HID_GAMEPAD !HERE
+    adv->setAppearance(GENERIC_HID); // !HERE Meta Quest 3 doesn't seem to accept HID_GAMEPAD
     adv->enableScanResponse(true);
     adv->start();
 }
@@ -259,6 +259,13 @@ void BleHidController::setLeftStick(int16_t lx, int16_t ly) {
     if (!_deviceConnected || _gpInputReport == nullptr) return;
     _gpState.leftX = lx;
     _gpState.leftY = ly;
+    sendGamepadState();
+}
+
+void BleHidController::setRightStick(int16_t rx, int16_t ry) {
+    if (!_deviceConnected || _gpInputReport == nullptr) return;
+    _gpState.rightX = rx;
+    _gpState.rightY = ry;
     sendGamepadState();
 }
 
