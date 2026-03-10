@@ -5,7 +5,7 @@
 #include "ESP32_VR_Pinball_Controller.h"
 #include "config.h"
 
-// #define DEBUG_ANALOG_NUDGE
+// #define DEBUG_ANALOG_NUDGE_RAW
 // #define DEBUG_ANALOG_NUDGE_VELOCITY
 
 // ###########################################################################
@@ -112,12 +112,11 @@ void loop() {
     }
 
     // Handle nudge detection from accelerometer
-    if (mode == ControllerMode::VPX) {
-        // handleAnalogNudge();
-        handleAnalogNudgeVelocity();
+    if (mode == ControllerMode::FX) {
+        handleDigitalNudge();
     }
     else {
-        handleDigitalNudge();
+        handleAnalogNudge();
     }
 
     // Handle button states
@@ -257,6 +256,8 @@ bool readAccelRaw(int16_t& x, int16_t& y) {
     return true;
 }
 
+#if 0
+
 /**
  * Reads multiple accelerometer samples and returns the peak X and Y values
  *
@@ -279,42 +280,20 @@ AccelPeak getAccelPeak() {
     return {maxX, maxY};
 }
 
-#if 1
-/**
- * Handles analog nudge input using integrated velocity model for VPX compatibility
- *
- * Instead of reporting raw accelerations, this function integrates acceleration
- * samples over time to produce velocity values, which eliminates USB sampling
- * rate mismatch artifacts. Velocities are reported on RX/RY axes alongside
- * the traditional acceleration-based X/Y axes.
- *
- * Applies three filters:
- *  - DC removal (bias/tilt compensation with sliding average)
- *  - Low-pass noise filter (exponential moving average)
- *  - Friction filter (half-life ~2s to prevent velocity drift)
- *
- * @param currentMillis Current time in milliseconds
- */
 void handleAnalogNudgeVelocity() {
     // --- Configuration ---
-    constexpr float SAMPLE_RATE_HZ = 500.0f; // Accelerometer polling rate (Hz)
+    constexpr float SAMPLE_RATE_HZ = 400.0f; // Accelerometer polling rate (Hz)
     constexpr float DT             = 1.0f / SAMPLE_RATE_HZ;
-
-    // DC removal filter: sliding average adaptation time ~300ms
-    constexpr float DC_ALPHA = DT / 0.300f; // ~300 ms time constant
 
     // Noise low-pass filter weight (0 = no update, 1 = no filter)
     constexpr float NOISE_ALPHA = 0.3f;
 
-    /*
     // Friction filter: half-life of ~2 seconds
     // factor = pow(0.5, 1 / (SAMPLE_RATE_HZ * halfLifeSeconds))
     constexpr float FRICTION_HALF_LIFE_S = 2.0f;
-    constexpr float FRICTION_FACTOR      = 0.99931f; // pow(0.5, 1/(500*2)) ≈ 0.99931
-    */
 
     // Dead zone to avoid sending residual noise to the host
-    constexpr float VELOCITY_DEAD_ZONE = 30.0f;
+    constexpr float VELOCITY_DEAD_ZONE = 10.0f;
 
     // Max velocity value for axis scaling
     constexpr float MAX_VELOCITY = 200.0f;
@@ -335,6 +314,12 @@ void handleAnalogNudgeVelocity() {
     const unsigned long sampleIntervalUs = static_cast<unsigned long>(DT * 1e6f);
 
     if (nowMicros - lastSampleMicros >= sampleIntervalUs) {
+        // Fix: ignore first sample to avoid spike from uninitialized timer
+        if (lastSampleMicros == 0) {
+            lastSampleMicros = nowMicros;
+            return;
+        }
+
         const float realDt = static_cast<float>(nowMicros - lastSampleMicros) * 1e-6f;
         lastSampleMicros   = nowMicros;
 
@@ -345,8 +330,8 @@ void handleAnalogNudgeVelocity() {
         const float ay = static_cast<float>(rawY);
 
         // 1. DC removal: sliding exponential average of the bias
-        dcX             += DC_ALPHA * (ax - dcX);
-        dcY             += DC_ALPHA * (ay - dcY);
+        dcX             += (realDt / 0.300f) * (ax - dcX);
+        dcY             += (realDt / 0.300f) * (ay - dcY);
         const float acX = ax - dcX;
         const float acY = ay - dcY;
 
@@ -359,27 +344,33 @@ void handleAnalogNudgeVelocity() {
         velY += filtY * realDt;
 
         // 4. Friction filter: attenuate to prevent drift accumulation
-        /*
-        velX *= FRICTION_FACTOR;
-        velY *= FRICTION_FACTOR;
-        */
+        const float friction = powf(0.5f, realDt / FRICTION_HALF_LIFE_S);
+        velX                 *= friction;
+        velY                 *= friction;
+
+#ifdef DEBUG_ANALOG_NUDGE_VELOCITY
+        static unsigned long lastPrint = 0;
+
+        static uint16_t maxRawX = 0, maxRawY = 0;
+        if (abs(rawX) > maxRawX) maxRawX = abs(rawX);
+        if (abs(rawY) > maxRawY) maxRawY = abs(rawY);
+
+        static float maxVelX = 0.0f, maxVelY = 0.0f;
+        if (abs(velX) > abs(maxVelX)) maxVelX = velX;
+        if (abs(velY) > abs(maxVelY)) maxVelY = velY;
+
+        const auto currentMillis = millis();
+        if (currentMillis - lastPrint > 1000) {
+            Serial.printf("maxRawX: %4d\tmaxRawY: %4d\tmaxVelX: %7.1f\tmaxVelY: %7.1f\n", maxRawX, maxRawY, maxVelX, maxVelY);
+            lastPrint = currentMillis;
+        }
+#endif
     }
 
     // --- Send HID report at report rate ---
     const auto currentMillis = millis();
     if (currentMillis - lastReportMillis < REPORT_INTERVAL_MS) return;
     lastReportMillis = currentMillis;
-
-#ifdef DEBUG_ANALOG_NUDGE_VELOCITY
-    static unsigned long lastPrint = 0;
-    static float maxVelX           = 0.0f, maxVelY = 0.0f;
-    if (abs(velX) > abs(maxVelX)) maxVelX = velX;
-    if (abs(velY) > abs(maxVelY)) maxVelY = velY;
-    if (currentMillis - lastPrint > 1000) {
-        Serial.printf("maxVelX: %7.1f\tmaxVelY: %7.1f\n", maxVelX, maxVelY);
-        lastPrint = currentMillis;
-    }
-#endif
 
     // Apply velocity dead zone
     const float outX = (fabsf(velX) < VELOCITY_DEAD_ZONE) ? 0.0f : velX;
@@ -397,53 +388,59 @@ void handleAnalogNudgeVelocity() {
     // hid.setLeftStick(stickX, stickY);
     hid.setRightStick(-stickX, stickY);
 }
+
+void handleAnalogNudgeRaw() {
+    constexpr float SAMPLE_RATE_HZ             = 400.0f;
+    constexpr unsigned long SAMPLE_INTERVAL_US = static_cast<unsigned long>(1e6f / SAMPLE_RATE_HZ); // 2500 µs
+    constexpr unsigned long REPORT_INTERVAL_MS = 10UL;                                              // 100 Hz report rate
+    constexpr float ACCEL_ALPHA                = 0.4f;
+    constexpr float ACCEL_DEAD_ZONE            = 200.0f;
+    constexpr int16_t ACCEL_MAX_VALUE          = 30000;
+
+    static unsigned long lastSampleMicros = 0;
+    static unsigned long lastReportMillis = 0;
+    static float xFiltered                = 0.0f, yFiltered = 0.0f;
+
+    // --- Sample at SAMPLE_RATE_HZ ---
+    const unsigned long nowMicros = micros();
+    if (nowMicros - lastSampleMicros >= SAMPLE_INTERVAL_US) {
+        if (lastSampleMicros == 0) {
+            lastSampleMicros = nowMicros;
+            return;
+        }
+        lastSampleMicros = nowMicros;
+
+        int16_t x = 0, y = 0;
+        if (!readAccelRaw(x, y)) return;
+
+#ifdef DEBUG_ANALOG_NUDGE_RAW
+        static unsigned long lastPrint = 0;
+        static unsigned long lastReset = 0;
+        static int16_t maxX            = 0, maxY = 0;
+
+        if (abs(x) > abs(maxX)) maxX = x;
+        if (abs(y) > abs(maxY)) maxY = y;
+        const auto currentMillis = millis();
+        if (currentMillis - lastPrint > 1000) {
+            Serial.printf("RAW maxX: %d\tmaxY: %d\n", maxX, maxY);
+            lastPrint = currentMillis;
+        }
+        if (currentMillis - lastReset > 10000) {
+            maxX      = 0;
+            maxY      = 0;
+            lastReset = currentMillis;
+        }
 #endif
 
-void handleAnalogNudge() {
-    constexpr uint16_t ANALOG_NUDGE_INTERVAL_MS = 10;
-    constexpr float ACCEL_ALPHA                 = 0.4f;   // Poids de la nouvelle valeur, ajuster entre 0.2-0.8
-    constexpr float ACCEL_DEAD_ZONE             = 200.0f; // à ajuster
-    constexpr int16_t ACCEL_MAX_VALUE           = 30000;
-
-    const auto currentMillis        = millis();
-    static unsigned long lastMillis = 0;
-
-    if (currentMillis - lastMillis < ANALOG_NUDGE_INTERVAL_MS) return;
-
-    lastMillis = currentMillis;
-
-    int16_t x = 0, y = 0;
-    if (!readAccelRaw(x, y)) return;
-
-#ifdef DEBUG_ANALOG_NUDGE
-    static unsigned long lastPrint = 0;
-    static unsigned long lastReset = 0;
-
-    static int16_t maxX = 0, maxY = 0;
-
-    if (abs(x) > abs(maxX)) maxX = x;
-    if (abs(y) > abs(maxY)) maxY = y;
-    if (currentMillis - lastPrint > 1000) {
-        Serial.printf("RAW maxX: %d\tmaxY: %d\n", maxX, maxY);
-        lastPrint = currentMillis;
+        // Low-pass filter applied at high sample rate for better noise rejection
+        xFiltered = ACCEL_ALPHA * static_cast<float>(x) + (1.0f - ACCEL_ALPHA) * xFiltered;
+        yFiltered = ACCEL_ALPHA * static_cast<float>(y) + (1.0f - ACCEL_ALPHA) * yFiltered;
     }
-    if (currentMillis - lastReset > 10000) {
-        maxX      = 0;
-        maxY      = 0;
-        lastReset = currentMillis;
-    }
-#endif
 
-    // Filtrage passe-bas pour réduire le bruit
-    static float xFiltered = 0, yFiltered = 0;
-
-#if 0
-    xFiltered = ACCEL_ALPHA * static_cast<float>(x) + (1.0f - ACCEL_ALPHA) * xFiltered;
-    yFiltered = ACCEL_ALPHA * static_cast<float>(y) + (1.0f - ACCEL_ALPHA) * yFiltered;
-#else
-    xFiltered = static_cast<float>(x);
-    yFiltered = static_cast<float>(y);
-#endif
+    // --- Report at REPORT_INTERVAL_MS ---
+    const auto currentMillis = millis();
+    if (currentMillis - lastReportMillis < REPORT_INTERVAL_MS) return;
+    lastReportMillis = currentMillis;
 
     int16_t stickX = 0, stickY = 0;
     if (fabsf(xFiltered) > ACCEL_DEAD_ZONE || fabsf(yFiltered) > ACCEL_DEAD_ZONE) {
@@ -457,9 +454,136 @@ void handleAnalogNudge() {
 
     hid.setLeftStick(stickX, stickY);
 }
+#endif
 
+
+/**
+ * Handles processing of analog nudge input from an accelerometer, including filtering,
+ * bias correction, and velocity computation, to drive virtual joystick controls.
+ *
+ * The method samples accelerometer input at a fixed rate, applies several signal
+ * processing stages (DC removal, low-pass filtering, integration, and friction-based
+ * velocity attenuation), and updates virtual joystick values at a specified reporting
+ * interval. The results are sent as left and right stick values, corresponding to
+ * acceleration and velocity respectively.
+ *
+ * - DC removal offsets biases using an exponential sliding average.
+ * - Noise is reduced with a low-pass filter.
+ * - Velocity is computed by integrating acceleration.
+ * - Friction prevents velocity drift accumulation.
+ *
+ * Analog dead zones are applied to both acceleration and velocity to avoid noise
+ * contributing to stick outputs.
+ */
+void handleAnalogNudge() {
+    // --- Configuration ---
+    constexpr float SAMPLE_RATE_HZ             = 400.0f;
+    constexpr auto SAMPLE_INTERVAL_US          = static_cast<unsigned long>(1000000.0f / SAMPLE_RATE_HZ);
+    constexpr unsigned long REPORT_INTERVAL_MS = 10UL;
+    constexpr float NOISE_ALPHA                = 0.3f; //!HERE
+
+    // Velocity pipeline
+    constexpr float FRICTION_HALF_LIFE_S = 2.0f;
+    constexpr float VELOCITY_DEAD_ZONE   = 10.0f;
+    constexpr float MAX_VELOCITY         = 200.0f;
+
+    // Acceleration pipeline
+    constexpr float ACCELERATION_DEAD_ZONE = 200.0f;
+    constexpr int16_t MAX_ACCELERATION     = 30000;
+
+    // Static state
+    static unsigned long lastSampleMicros = 0;
+    static unsigned long lastReportMillis = 0;
+    static float dcX                      = 0.0f, dcY   = 0.0f;
+    static float filtX                    = 0.0f, filtY = 0.0f;
+    static float velX                     = 0.0f, velY  = 0.0f;
+
+    // --- SAMPLE AT SAMPLE_RATE_HZ ---
+    const unsigned long nowMicros = micros();
+    if (nowMicros - lastSampleMicros >= SAMPLE_INTERVAL_US) {
+
+        // Ignore first sample to avoid spike from uninitialized timer
+        if (lastSampleMicros == 0) {
+            lastSampleMicros = nowMicros;
+            return;
+        }
+
+        const float realDt = static_cast<float>(nowMicros - lastSampleMicros) * 1e-6f;
+        lastSampleMicros   = nowMicros;
+
+        int16_t rawX, rawY;
+        if (!readAccelRaw(rawX, rawY)) {
+            filtX = 0.0f;
+            filtY = 0.0f;
+            velX  = 0.0f;
+            velY  = 0.0f;
+            hid.setLeftStick(0, 0);
+            hid.setRightStick(0, 0);
+            return;
+        }
+
+        const float ax = static_cast<float>(rawX);
+        const float ay = static_cast<float>(rawY);
+
+        // 1. DC removal: sliding exponential average of the bias
+        const float dcAlpha = std::clamp(realDt / 0.300f, 0.0f, 1.0f);
+        dcX                 += dcAlpha * (ax - dcX);
+        dcY                 += dcAlpha * (ay - dcY);
+        const float acX     = ax - dcX;
+        const float acY     = ay - dcY;
+
+        // 2. Noise low-pass filter
+        filtX = NOISE_ALPHA * acX + (1.0f - NOISE_ALPHA) * filtX;
+        filtY = NOISE_ALPHA * acY + (1.0f - NOISE_ALPHA) * filtY;
+
+        // 3. Integrate acceleration → velocity  (v += a * realDt)
+        velX += filtX * realDt;
+        velY += filtY * realDt;
+
+        // 4. Friction filter: attenuate to prevent drift accumulation
+        const float friction = powf(0.5f, realDt / FRICTION_HALF_LIFE_S);
+        velX                 *= friction;
+        velY                 *= friction;
+    }
+
+    // TODO Debug output
+
+    // --- REPORT AT REPORT_INTERVAL_MS ---
+    const auto currentMillis = millis();
+    if (currentMillis - lastReportMillis < REPORT_INTERVAL_MS) return;
+    lastReportMillis = currentMillis;
+
+    // Left stick: acceleration
+    const float outRawX = (fabsf(filtX) > ACCELERATION_DEAD_ZONE) ? filtX : 0.0f;
+    const float outRawY = (fabsf(filtY) > ACCELERATION_DEAD_ZONE) ? filtY : 0.0f;
+
+    const float scaledLeftX = outRawX * 32767.0f / static_cast<float>(MAX_ACCELERATION);
+    const float scaledLeftY = outRawY * 32767.0f / static_cast<float>(MAX_ACCELERATION);
+
+    const int16_t leftX = static_cast<int16_t>(std::clamp(scaledLeftX, -32767.0f, 32767.0f));
+    const int16_t leftY = static_cast<int16_t>(std::clamp(scaledLeftY, -32767.0f, 32767.0f));
+
+    hid.setLeftStick(leftX, leftY);
+
+    // Right stick: velocity
+    const float outX = (fabsf(velX) < VELOCITY_DEAD_ZONE) ? 0.0f : velX;
+    const float outY = (fabsf(velY) < VELOCITY_DEAD_ZONE) ? 0.0f : velY;
+
+    const float scaledRightX = outX * 32767.0f / MAX_VELOCITY;
+    const float scaledRightY = outY * 32767.0f / MAX_VELOCITY;
+
+    const int16_t rightX = static_cast<int16_t>(std::clamp(scaledRightX, -32767.0f, 32767.0f));
+    const int16_t rightY = static_cast<int16_t>(std::clamp(scaledRightY, -32767.0f, 32767.0f));
+
+    hid.setRightStick(rightX, rightY);
+}
+
+
+/**
+ * Handles digital nudge input for FX mode by detecting peaks in accelerometer data and sending corresponding key presses
+ */
 void handleDigitalNudge() {
-    constexpr uint16_t SAMPLE_INTERVAL_MS = 10;
+    constexpr uint16_t SAMPLE_INTERVAL_MS = 10;      // Sampling interval for accelerometer readings (ms)
     constexpr float ALPHA                 = 0.4f;    // Low-pass filter weight
     constexpr float NUDGE_THRESHOLD       = 3000.0f; // Trigger threshold (tune to taste)
     constexpr float RELEASE_THRESHOLD     = 1500.0f; // Release threshold (hysteresis)
@@ -467,14 +591,16 @@ void handleDigitalNudge() {
     const auto currentMillis = millis();
 
     static unsigned long lastSampleMillis = 0;
-    static float filtX                    = 0.0f, filtY = 0.0f;
+
+    static float filtX = 0.0f, filtY = 0.0f;
 
     // Throttle sampling rate
     if (currentMillis - lastSampleMillis < SAMPLE_INTERVAL_MS) return;
     lastSampleMillis = currentMillis;
 
     int16_t rawX, rawY;
-    if (!readAccelRaw(rawX, rawY)) return;
+    if (!readAccelRaw(rawX, rawY))  return;
+
 
     // Low-pass filter
     filtX = ALPHA * static_cast<float>(rawX) + (1.0f - ALPHA) * filtX;
@@ -485,42 +611,32 @@ void handleDigitalNudge() {
     const bool aboveThreshold = (absX > NUDGE_THRESHOLD || absY > NUDGE_THRESHOLD);
 
     // Cooldown guard
-    if (aboveThreshold && !nudgeState.isNudging &&
-        (currentMillis - nudgeState.lastNudgeMillis > COOLDOWN_MS)) {
+    if (
+        aboveThreshold && !nudgeState.isNudging &&
+        (currentMillis - nudgeState.lastNudgeMillis > COOLDOWN_MS)
+    ) {
         nudgeState.lastNudgeMillis = currentMillis;
         nudgeState.isNudging       = true;
         nudgeState.nudgeKey        = 0;
 
         // Determine nudge direction (Y axis = forward, X axis = left/right)
         if (filtY > 0 && filtY > absX) {
-            switch (mode) {
-            case ControllerMode::FX: nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD);
-                break;
-            case ControllerMode::VPX:
-            case ControllerMode::CLASSIC: hid.setLeftStick(0, std::clamp<int16_t>(static_cast<int16_t>(-filtY), INT16_MIN, INT16_MAX));
-                break;
-            default: break;
-            }
-            Serial.println("Nudge forward");
+            nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD);
         }
         else {
-            switch (mode) {
-            case ControllerMode::FX: nudgeState.nudgeKey = static_cast<uint8_t>(filtX < 0 ? FxNudgeKey::LEFT : FxNudgeKey::RIGHT);
-                break;
-            case ControllerMode::VPX:
-            case ControllerMode::CLASSIC: hid.setLeftStick(std::clamp<int16_t>(static_cast<int16_t>(filtX), INT16_MIN, INT16_MAX), 0);
-                break;
-            default: break;
-            }
+            nudgeState.nudgeKey = static_cast<uint8_t>(filtX < 0 ? FxNudgeKey::LEFT : FxNudgeKey::RIGHT);
         }
 
         if (nudgeState.nudgeKey != 0) hid.keyPress(nudgeState.nudgeKey);
     }
 
     // Release nudge when signal drops below release threshold (hysteresis)
-    else if (nudgeState.isNudging && !aboveThreshold &&
+    else if (
+        nudgeState.isNudging &&
+        !aboveThreshold &&
         absX < RELEASE_THRESHOLD && absY < RELEASE_THRESHOLD &&
-        (currentMillis - nudgeState.lastNudgeMillis > NUDGE_RESET_MS)) {
+        (currentMillis - nudgeState.lastNudgeMillis > NUDGE_RESET_MS)
+    ) {
         nudgeState.isNudging = false;
         if (nudgeState.nudgeKey != 0) {
             hid.keyRelease(nudgeState.nudgeKey);

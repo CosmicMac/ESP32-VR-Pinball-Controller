@@ -63,6 +63,7 @@ bool readAccelRaw(int16_t& x, int16_t& y);
 AccelPeak getAccelPeak();
 void calibrateSensor(uint16_t samples = 500);
 void handleAnalogNudge();
+void handleAnalogNudgeRaw();
 void handleAnalogNudgeVelocity();
 void handleDigitalNudge();
 void performButtonAction(const ButtonAction& action, bool isPressed);
