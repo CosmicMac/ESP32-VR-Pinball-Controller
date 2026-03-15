@@ -62,15 +62,24 @@ static const uint8_t hidReportMapData[] = {
     0x95, 0x01,               // Report Count 1
     0x81, 0x03,               // Input (Constant, Variable, Absolute)
 
-    // Joysticks
-    0x09, 0x30,               // Usage Left X
-    0x09, 0x31,               // Usage Left Y
-    0x09, 0x32,               // Usage Right X (Z)
-    0x09, 0x35,               // Usage Right Y (Rz)
-    0x16, 0x00, 0x80,         // Logical Min 0x8000 (-32768)
-    0x26, 0xFF, 0x7F,         // Logical Max 0x7FFF (32767)
+    // Left stick: X, Y
+    0x05, 0x01,               // Usage Page (Generic Desktop)
+    0x09, 0x30,               // Usage X
+    0x09, 0x31,               // Usage Y
+    0x16, 0x00, 0x80,         // Logical Min -32768
+    0x26, 0xFF, 0x7F,         // Logical Max 32767
     0x75, 0x10,               // Report Size 16 bits
-    0x95, 0x04,               // Report Count 4
+    0x95, 0x02,               // Report Count 2
+    0x81, 0x02,               // Input (Data, Variable, Absolute)
+
+    // Right stick: Rx, Ry
+    0x05, 0x01,               // Usage Page (Generic Desktop)
+    0x09, 0x33,               // Usage Rx
+    0x09, 0x34,               // Usage Ry
+    0x16, 0x00, 0x80,         // Logical Min -32768
+    0x26, 0xFF, 0x7F,         // Logical Max 32767
+    0x75, 0x10,               // Report Size 16 bits
+    0x95, 0x02,               // Report Count 2
     0x81, 0x02,               // Input (Data, Variable, Absolute)
 
     // Gâchettes LT/RT
@@ -184,10 +193,18 @@ void BleHidController::keyModRelease(uint8_t modifier) {
  * @param keycode
  */
 void BleHidController::keyPress(uint8_t keycode) {
-    if (!_deviceConnected || _kbInputReport == nullptr) return;
-    for (size_t i = 0; i < 6; ++i) {
-        if (_kbState.keys[i] == 0x00) {
-            _kbState.keys[i] = keycode;
+    if (keycode == KEY_NONE || !_deviceConnected || _kbInputReport == nullptr) return;
+
+    // Verify if key already exists
+    for (unsigned char key : _kbState.keys) {
+        if (key == keycode) {
+            return;
+        }
+    }
+
+    for (unsigned char & key : _kbState.keys) {
+        if (key == 0x00) {
+            key = keycode;
             break;
         }
     }
@@ -203,9 +220,9 @@ void BleHidController::keyRelease(uint8_t keycode) {
     if (!_deviceConnected || _kbInputReport == nullptr) return;
 
     // Remove the keycode from the keys array
-    for (size_t i = 0; i < 6; ++i) {
-        if (_kbState.keys[i] == keycode) {
-            _kbState.keys[i] = 0x00;
+    for (unsigned char & key : _kbState.keys) {
+        if (key == keycode) {
+            key = 0x00;
             break;
         }
     }
@@ -255,18 +272,20 @@ void BleHidController::dpadRelease() {
     sendGamepadState();
 }
 
-void BleHidController::setLeftStick(int16_t lx, int16_t ly) {
+void BleHidController::setLeftStick(int16_t lx, int16_t ly, bool sendState) {
     if (!_deviceConnected || _gpInputReport == nullptr) return;
     _gpState.leftX = lx;
     _gpState.leftY = ly;
-    sendGamepadState();
+
+    if (sendState) sendGamepadState();
 }
 
-void BleHidController::setRightStick(int16_t rx, int16_t ry) {
+void BleHidController::setRightStick(int16_t rx, int16_t ry, bool sendState) {
     if (!_deviceConnected || _gpInputReport == nullptr) return;
     _gpState.rightX = rx;
     _gpState.rightY = ry;
-    sendGamepadState();
+
+    if (sendState) sendGamepadState();
 }
 
 void BleHidController::sendGamepad(uint16_t buttons, uint8_t dpad, int16_t lx, int16_t ly, int16_t rx, int16_t ry, uint16_t lt, uint16_t rt) {

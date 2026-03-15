@@ -173,8 +173,8 @@ public:
     void begin(
         const char* deviceName         = "BLE HID Controller",
         const char* deviceManufacturer = "CosmicMac",
-        uint16_t vendorId              = 0x045E, // Microsoft VID, for compatibility
-        uint16_t productId             = 0x0B13, // XBox Bluetooth gamepad PID, for compatibility
+        uint16_t vendorId              = 0x1234,
+        uint16_t productId             = 0x5678,
         uint16_t version               = 0x0100
     );
 
@@ -193,11 +193,11 @@ public:
     void buttonRelease(uint16_t button);
     void dpadPress(uint8_t dpad);
     void dpadRelease();
-    void setLeftStick(int16_t lx, int16_t ly);
-    void setRightStick(int16_t rx, int16_t ry);
+    void setLeftStick(int16_t lx, int16_t ly, bool sendState = true);
+    void setRightStick(int16_t rx, int16_t ry, bool sendState = true);
+    void sendGamepadState();
 
 private:
-    void sendGamepadState();
     void sendKeyboardState();
 
     struct KeyReport
@@ -222,8 +222,8 @@ private:
         int16_t leftY    = 0;             // Left stick Y
         int16_t rightX   = 0;             // Right stick X
         int16_t rightY   = 0;             // Right stick Y
-        uint16_t lt      = 0;             // L eft trigger (0-255), padding (8 bits)
-        uint16_t rt      = 0;             // Right trigger (0-255), padding (8 bits)
+        uint16_t lt      = 0;             // L eft trigger (0-1023), padding (8 bits)
+        uint16_t rt      = 0;             // Right trigger (0-1023), padding (8 bits)
     };
 
     static bool _deviceConnected;

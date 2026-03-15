@@ -28,22 +28,19 @@ constexpr uint8_t CHANGE_MODE_PIN         = 21; // Momentary button to cycle thr
 // #########################################################
 // GPIO pins for MPU6050
 // #########################################################
-constexpr uint8_t I2C_SDA_PIN = 8;  // I2C SDA pin
-constexpr uint8_t I2C_SCL_PIN = 9;  // I2C SCL pin
-constexpr uint8_t MPU_INT_PIN = 10; // MPU6050 interrupt pin
+constexpr uint8_t I2C_SDA_PIN = 8; // I2C SDA pin
+constexpr uint8_t I2C_SCL_PIN = 9; // I2C SCL pin
 
 
 // #########################################################
 // MPU6050 parameters
 // #########################################################
-constexpr uint16_t SENSOR_ROTATION           = 90;                  // Rotation of the sensor on the horizontal plane (0, 90, 180, 270 degrees clockwise) ---
-constexpr uint8_t MPU6050_ADDR               = 0x68;                // MPU6050 I2C address
-constexpr uint8_t ACCEL_RANGE                = MPU6050_ACCEL_FS_2;  // Accelerometer range (±2g)
-constexpr uint8_t DLPF_MODE                  = MPU6050_DLPF_BW_188; // Digital low-pass filter configuration (from 5 to 256 Hz, the fastest the noisiest), default : MPU6050_DLPF_BW_188
-constexpr uint32_t COOLDOWN_MS               = 200;                 // Delay between two motion detections
-constexpr uint32_t NUDGE_RESET_MS            = 50;                  // Time to reset nudge to center
-constexpr uint8_t NUDGE_SAMPLES              = 5;                   // Number of samples to average for nudge detection
-constexpr uint8_t ACCEL_XOUT_H               = 0x3B;                // MPU6050 register address for accelerometer X-axis high byte
+constexpr uint16_t SENSOR_ROTATION = 90;                  // Rotation of the sensor on the horizontal plane (0, 90, 180, 270 degrees clockwise) ---
+constexpr uint8_t MPU6050_ADDR     = 0x68;                // MPU6050 I2C address
+constexpr uint8_t ACCEL_RANGE      = MPU6050_ACCEL_FS_2;  // Accelerometer range (±2g)
+constexpr uint8_t DLPF_MODE        = MPU6050_DLPF_BW_188; // Digital low-pass filter configuration (from 5 to 256 Hz, the fastest the noisiest), default : MPU6050_DLPF_BW_188
+constexpr uint32_t COOLDOWN_MS     = 200;                 // Delay between two motion detections
+constexpr uint32_t NUDGE_RESET_MS  = 50;                  // Time to reset nudge to center
 
 
 // #########################################################
@@ -123,14 +120,6 @@ enum class FxNudgeKey : uint8_t
     LEFT    = KEY_F,
 };
 
-// VPX keys
-enum class VpxNudgeKey : uint8_t
-{
-    FORWARD = KEY_SPACE,
-    LEFT    = KEY_Z,
-    RIGHT   = KEY_SLASH,
-};
-
 
 // #########################################################
 // BLE
@@ -140,3 +129,18 @@ constexpr auto DEVICE_MANUFACTURER         = "CosmicMac";             // BLE dev
 constexpr uint8_t BTN_DEBOUNCE_MS          = 10;                      // Debounce delay for buttons in ms
 constexpr uint16_t CONFIG_SAVE_INTERVAL_MS = 5000;                    // Interval to save configuration to flash in ms
 
+
+// #########################################################
+// Nudge parameters
+// #########################################################
+
+// Analog
+constexpr unsigned long ANALOG_NUDGE_REPORT_INTERVAL_MS = 20;    // HID report interval for analog nudge in ms
+constexpr uint16_t ANALOG_NUDGE_DEAD_ZONE               = 500;   // Minimum velocity to trigger a nudge, helps to avoid triggering on sensor noise
+constexpr int16_t MAX_ACCELERATION                      = 10000; // Maximum expected acceleration, helps to scale the full range of the stick to the expected range of acceleration in-game
+
+// Digital
+constexpr uint16_t DIGITAL_NUDGE_SAMPLE_INTERVAL_MS = 10;      // Sampling interval for accelerometer readings (ms)
+constexpr float DIGITAL_NUDGE_ALPHA                 = 0.4f;    // Low-pass filter weight
+constexpr float DIGITAL_NUDGE_THRESHOLD             = 3000.0f; // Trigger threshold
+constexpr float DIGITAL_NUDGE_RELEASE_THRESHOLD     = 1500.0f; // Release threshold (hysteresis)

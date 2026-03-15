@@ -9,7 +9,7 @@ enum class LedColor : uint8_t { OFF, RED, GREEN, BLUE, YELLOW, PURPLE, CYAN, WHI
 
 enum class ButtonType : uint8_t { BUTTON, DPAD };
 
-enum class ActionType : uint8_t { NONE, KEYBOARD_KEY, GAMEPAD_BUTTON, GAMEPAD_DPAD, GAMEPAD_STICK };
+enum class ActionType : uint8_t { NONE, KEYBOARD_KEY, GAMEPAD_BUTTON, GAMEPAD_DPAD };
 
 //@formatter: on
 
@@ -49,22 +49,13 @@ struct NudgeState
     uint8_t nudgeKey              = 0;
 };
 
-struct AccelPeak
-{
-    int16_t x, y;
-};
-
 // Function declarations
 void handleButton(ButtonInfo& button);
 void setMode(ControllerMode newMode, bool initialConfig = false);
 void setLedColor(LedColor color);
 void setupAccelerometer();
 bool readAccelRaw(int16_t& x, int16_t& y);
-AccelPeak getAccelPeak();
-void calibrateSensor(uint16_t samples = 500);
 void handleAnalogNudge();
-void handleAnalogNudgeRaw();
-void handleAnalogNudgeVelocity();
 void handleDigitalNudge();
 void performButtonAction(const ButtonAction& action, bool isPressed);
 ButtonAction getButtonAction(const ButtonInfo& button, ControllerMode mode);
