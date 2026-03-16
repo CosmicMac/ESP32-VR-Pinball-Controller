@@ -5,7 +5,7 @@
 #include "ESP32_VR_Pinball_Controller.h"
 #include "config.h"
 
-// #define DEBUG_ANALOG_NUDGE
+#define DEBUG_ANALOG_NUDGE
 
 // ###########################################################################
 // Array of button configurations
@@ -406,6 +406,7 @@ static int16_t maxRawX   = 0, maxRawY   = 0,
 }
 #endif
 
+#if 0
 
 /**
  * Handles analog nudge input for Classic and VPX by tracking peak accelerometer values and sending them as left stick input
@@ -421,8 +422,8 @@ void handleAnalogNudge() {
 
     if (!readAccelRaw(rawX, rawY)) return;
 
-    if (std::abs(static_cast<int32_t>(rawX)) > std::abs(static_cast<int32_t>(peakX))) peakX = rawX;
-    if (std::abs(static_cast<int32_t>(rawY)) > std::abs(static_cast<int32_t>(peakY))) peakY = rawY;
+    if (!ANALOG_NUDGE_SEND_PEAKS || std::abs(static_cast<int32_t>(rawX)) > std::abs(static_cast<int32_t>(peakX))) peakX = rawX;
+    if (!ANALOG_NUDGE_SEND_PEAKS || std::abs(static_cast<int32_t>(rawY)) > std::abs(static_cast<int32_t>(peakY))) peakY = rawY;
 
     // Report
     static unsigned long lastReportMillis = 0;
@@ -430,29 +431,29 @@ void handleAnalogNudge() {
     if (currentMillis - lastReportMillis >= ANALOG_NUDGE_REPORT_INTERVAL_MS) {
         lastReportMillis = currentMillis;
 
-        int16_t leftX = static_cast<int16_t>(std::clamp(static_cast<int64_t>(peakX) * 32767 / MAX_ACCELERATION, -32767LL, 32767LL)),
-                leftY = static_cast<int16_t>(std::clamp(static_cast<int64_t>(peakY) * 32767 / MAX_ACCELERATION, -32767LL, 32767LL));
+        int16_t leftX = static_cast<int16_t>(std::clamp(static_cast<int64_t>(peakX) * 32767 / ANALOG_NUDGE_MAX_ACCELERATION, -32767LL, 32767LL)),
+                leftY = static_cast<int16_t>(std::clamp(static_cast<int64_t>(peakY) * 32767 / ANALOG_NUDGE_MAX_ACCELERATION, -32767LL, 32767LL));
 
         // Dead zone
-        if (std::abs(leftX) < ANALOG_NUDGE_DEAD_ZONE) leftX = 0;
-        if (std::abs(leftY) < ANALOG_NUDGE_DEAD_ZONE) leftY = 0;
+        if (std::abs(leftX) < ANALOG_NUDGE_ACCELERATION_DEAD_ZONE) leftX = 0;
+        if (std::abs(leftY) < ANALOG_NUDGE_ACCELERATION_DEAD_ZONE) leftY = 0;
 
         hid.setLeftStick(leftX, leftY);
 
 #ifdef DEBUG_ANALOG_NUDGE
-        static unsigned long lastPrint = 0,
-                             lastReset = 0;
+static unsigned long lastPrint = 0,
+                     lastReset = 0;
 
-        static int16_t maxPeakX = 0, maxPeakY = 0,
-                       maxLeftX = 0, maxLeftY = 0;
+static int16_t maxPeakX = 0, maxPeakY = 0,
+               maxLeftX = 0, maxLeftY = 0;
 
-        if (std::abs(static_cast<int32_t>(peakX)) > std::abs(static_cast<int32_t>(maxPeakX))) maxPeakX = peakX;
-        if (std::abs(static_cast<int32_t>(peakY)) > std::abs(static_cast<int32_t>(maxPeakY))) maxPeakY = peakY;
+        if (std::abs(static_cast<int32_t>(peakX)) > std::abs (static_cast<int32_t>(maxPeakX))) maxPeakX= peakX;
+        if (std::abs(static_cast<int32_t>(peakY)) > std::abs (static_cast<int32_t>(maxPeakY))) maxPeakY= peakY;
 
-        if (std::abs(static_cast<int32_t>(leftX)) > std::abs(static_cast<int32_t>(maxLeftX))) maxLeftX = leftX;
-        if (std::abs(static_cast<int32_t>(leftY)) > std::abs(static_cast<int32_t>(maxLeftY))) maxLeftY = leftY;
+        if (std::abs(static_cast<int32_t>(leftX)) > std::abs (static_cast<int32_t>(maxLeftX))) maxLeftX= leftX;
+        if (std::abs(static_cast<int32_t>(leftY)) > std::abs (static_cast<int32_t>(maxLeftY))) maxLeftY= leftY;
 
-        if (currentMillis - lastPrint > 1000) {
+        if (currentMillis- lastPrint> 1000) {
             Serial.printf(
                 "maxPeak[%6d, %6d] *** maxLeft[%6d, %6d]\n",
                 maxPeakX, maxPeakY, maxLeftX, maxLeftY
@@ -472,9 +473,195 @@ void handleAnalogNudge() {
 
 #endif
 
-        peakX = 0;
-        peakY = 0;
+peakX=0;
+peakY=0;
     }
+}
+#endif
+
+/**
+ * Handles analog nudge input for Classic and VPX modes
+ *
+ * Implements the dual-output model from the Accelerometer Velocity Input Technical Note:
+ *   - Left stick  → instantaneous filtered acceleration (traditional model)
+ *                   Used by Classic mode and any simulator that reads raw acceleration
+ *   - Right stick → device-integrated velocity (new model)
+ *                   Used by VPX, which applies the differential velocity directly to balls
+ *
+ * Signal pipeline, executed at ANALOG_NUDGE_SAMPLE_RATE_HZ:
+ *   1. DC removal  : exponential moving average continuously tracks and subtracts the
+ *                    gravity/tilt bias (converges in ~ANALOG_NUDGE_DC_ADAPT_TIME_S)
+ *   2. Noise filter: low-pass exponential filter attenuates high-frequency sensor noise
+ *   3. Integration : vel += accel * dt  (uses real elapsed time for accuracy)
+ *   4. Friction    : vel *= pow(0.5, dt / halfLife)  prevents drift accumulation;
+ *                    produces a natural ball-rolling-to-a-stop effect in the simulation
+ *
+ * HID reports are sent at ANALOG_NUDGE_REPORT_INTERVAL_MS, decoupled from the sample rate.
+ * Both outputs are always present: the simulator reads the axis pair it supports and
+ * ignores the other — no mode switching required (ref. tech note §"Compatibility")
+ */
+void handleAnalogNudge() {
+    constexpr uint32_t SAMPLE_INTERVAL_US =
+        static_cast<uint32_t>(1'000'000.0f / ANALOG_NUDGE_SAMPLE_RATE_HZ);
+
+    // --- Persistent state ---
+    static uint32_t lastSampleMicros = 0;
+    static uint32_t lastReportMillis = 0;
+
+    static float dcX   = 0.0f, dcY   = 0.0f; // DC bias estimate (gravity + tilt)
+    static float filtX = 0.0f, filtY = 0.0f; // Noise-filtered acceleration
+    static float velX  = 0.0f, velY  = 0.0f; // Integrated velocity
+
+    // =========================================================================
+    // SAMPLING STAGE  —  runs at ANALOG_NUDGE_SAMPLE_RATE_HZ
+    // =========================================================================
+    const uint32_t nowMicros = micros();
+    if (nowMicros - lastSampleMicros >= SAMPLE_INTERVAL_US) {
+        // Skip the very first call to avoid a dt spike from an uninitialized timer
+        if (lastSampleMicros == 0) {
+            lastSampleMicros = nowMicros;
+            return;
+        }
+
+        const float dt   = static_cast<float>(nowMicros - lastSampleMicros) * 1e-6f;
+        lastSampleMicros = nowMicros;
+
+        int16_t rawX = 0, rawY = 0;
+        if (!readAccelRaw(rawX, rawY)) {
+            // Sensor error: reset all state and silence the sticks
+            dcX = dcY = filtX = filtY = velX = velY = 0.0f;
+            hid.setLeftStick(0, 0, false);
+            hid.setRightStick(0, 0);
+            return;
+        }
+
+        const float ax = static_cast<float>(rawX);
+        const float ay = static_cast<float>(rawY);
+
+        // 1. DC removal: exponential moving average tracks the slow-moving bias
+        //    α = dt / adaptTime  →  converges to true bias in ~adaptTime seconds
+        //    (ref. tech note §"DC removal filtering")
+        const float dcAlpha = std::clamp(dt / ANALOG_NUDGE_DC_ADAPT_TIME_S, 0.0f, 1.0f);
+        dcX                 += dcAlpha * (ax - dcX);
+        dcY                 += dcAlpha * (ay - dcY);
+
+        const float acX = ax - dcX; // bias-corrected acceleration
+        const float acY = ay - dcY;
+
+        // 2. Noise low-pass filter
+        //    (ref. tech note §"Noise filtering")
+        filtX = ANALOG_NUDGE_NOISE_ALPHA * acX + (1.0f - ANALOG_NUDGE_NOISE_ALPHA) * filtX;
+        filtY = ANALOG_NUDGE_NOISE_ALPHA * acY + (1.0f - ANALOG_NUDGE_NOISE_ALPHA) * filtY;
+
+        // 3. Integrate acceleration → velocity  (v += a * dt)
+        //    The device runs this at the full sensor rate, giving VP a correctly
+        //    pre-integrated value — VP no longer needs to integrate asynchronously
+        //    (ref. tech note §"The new alternative simulator input model")
+        velX += filtX * dt;
+        velY += filtY * dt;
+
+        // 4. Friction filter: attenuate velocity every sample
+        //    factor = pow(0.5, dt / halfLife)
+        //    (ref. tech note §"Friction filtering")
+        const float friction = powf(0.5f, dt / ANALOG_NUDGE_FRICTION_HALF_LIFE_S);
+        velX                 *= friction;
+        velY                 *= friction;
+    }
+
+    // =========================================================================
+    // REPORTING STAGE  —  runs at ANALOG_NUDGE_REPORT_INTERVAL_MS
+    // =========================================================================
+    const uint32_t nowMillis = millis();
+    if (nowMillis - lastReportMillis < ANALOG_NUDGE_REPORT_INTERVAL_MS) return;
+    lastReportMillis = nowMillis;
+
+    // Left stick → filtered acceleration (traditional model: Classic / non-VPX simulators)
+    {
+        int16_t leftX = 0, leftY = 0;
+
+        if (fabsf(filtX) > ANALOG_NUDGE_ACCELERATION_DEAD_ZONE) {
+            const float scaledX = filtX * 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_ACCELERATION);
+            leftX       = static_cast<int16_t>(std::clamp(scaledX, -32767.0f, 32767.0f));
+        }
+
+        if (fabsf(filtY) > ANALOG_NUDGE_ACCELERATION_DEAD_ZONE) {
+            const float scaledY = filtY * 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_ACCELERATION);
+            leftY       = static_cast<int16_t>(std::clamp(scaledY, -32767.0f, 32767.0f));
+        }
+
+        hid.setLeftStick(leftX, leftY, false);
+    }
+
+    // Right stick → integrated velocity (new model: VPX)
+    //   VP reads the instantaneous value and applies (newVel - oldVel) to each ball,
+    //   so missed or duplicate USB polls are harmless — correctness is preserved
+    //   (ref. tech note §"Why device-side velocity integration fixes this")
+    {
+        int16_t rightX = 0, rightY = 0;
+
+        if (fabsf(velX) > ANALOG_NUDGE_VELOCITY_DEAD_ZONE) {
+            const float scaledX = velX * 32767.0f / ANALOG_NUDGE_MAX_VELOCITY;
+            rightX      = static_cast<int16_t>(std::clamp(scaledX, -32767.0f, 32767.0f));
+        }
+
+        if (fabsf(velY) > ANALOG_NUDGE_VELOCITY_DEAD_ZONE) {
+            const float scaledY = velY * 32767.0f / ANALOG_NUDGE_MAX_VELOCITY;
+            rightY      = static_cast<int16_t>(std::clamp(scaledY, -32767.0f, 32767.0f));
+        }
+
+        hid.setRightStick(rightX, rightY, false);
+    }
+
+    hid.sendGamepadState();
+
+#ifdef DEBUG_ANALOG_NUDGE
+    static uint32_t lastPrint = 0, lastReset = 0;
+
+    static float maxFiltX    = 0.0f, maxFiltY = 0.0f,
+                 maxVelX     = 0.0f, maxVelY  = 0.0f;
+    static int16_t maxLeftX  = 0, maxLeftY    = 0,
+                   maxRightX = 0, maxRightY   = 0;
+
+    // Capture per-report maxima (absolute values)
+    if (fabsf(filtX) > fabsf(maxFiltX)) maxFiltX = filtX;
+    if (fabsf(filtY) > fabsf(maxFiltY)) maxFiltY = filtY;
+    if (fabsf(velX) > fabsf(maxVelX)) maxVelX = velX;
+    if (fabsf(velY) > fabsf(maxVelY)) maxVelY = velY;
+
+    // (re-compute leftX/rightX from state for debug — avoids storing extra statics)
+    {
+        const int16_t lx = static_cast<int16_t>(std::clamp(filtX * 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_ACCELERATION), -32767.0f, 32767.0f));
+        const int16_t ly = static_cast<int16_t>(std::clamp(filtY * 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_ACCELERATION), -32767.0f, 32767.0f));
+        const int16_t rx = static_cast<int16_t>(std::clamp(velX * 32767.0f / ANALOG_NUDGE_MAX_VELOCITY, -32767.0f, 32767.0f));
+        const int16_t ry = static_cast<int16_t>(std::clamp(velY * 32767.0f / ANALOG_NUDGE_MAX_VELOCITY, -32767.0f, 32767.0f));
+
+        if (std::abs(lx) > std::abs(maxLeftX)) maxLeftX = lx;
+        if (std::abs(ly) > std::abs(maxLeftY)) maxLeftY = ly;
+        if (std::abs(rx) > std::abs(maxRightX)) maxRightX = rx;
+        if (std::abs(ry) > std::abs(maxRightY)) maxRightY = ry;
+    }
+
+    if (nowMillis - lastPrint > 1000) {
+        Serial.printf(
+            "maxAcc[%7.1f, %7.1f] / maxVel[%7.1f, %7.1f] *** maxLeft[%6d, %6d] / maxRight[%6d, %6d]\n",
+            maxFiltX, maxFiltY, maxVelX, maxVelY, maxLeftX, maxLeftY, maxRightX, maxRightY
+        );
+        lastPrint = nowMillis;
+
+        if (nowMillis - lastReset > 5000) {
+            Serial.println("\nResetting debug counters...");
+            maxFiltX  = 0.0f;
+            maxFiltY  = 0.0f;
+            maxVelX   = 0.0f;
+            maxVelY   = 0.0f;
+            maxLeftX  = 0;
+            maxLeftY  = 0;
+            maxRightX = 0;
+            maxRightY = 0;
+            lastReset = nowMillis;
+        }
+    }
+#endif
 }
 
 
@@ -483,7 +670,6 @@ void handleAnalogNudge() {
  * values exceed a threshold and sending corresponding key presses
  */
 void handleDigitalNudge() {
-
     const auto currentMillis = millis();
 
     static unsigned long lastSampleMillis = 0;

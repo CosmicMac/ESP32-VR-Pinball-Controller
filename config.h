@@ -135,9 +135,21 @@ constexpr uint16_t CONFIG_SAVE_INTERVAL_MS = 5000;                    // Interva
 // #########################################################
 
 // Analog
-constexpr unsigned long ANALOG_NUDGE_REPORT_INTERVAL_MS = 20;    // HID report interval for analog nudge in ms
-constexpr uint16_t ANALOG_NUDGE_DEAD_ZONE               = 500;   // Minimum velocity to trigger a nudge, helps to avoid triggering on sensor noise
-constexpr int16_t MAX_ACCELERATION                      = 10000; // Maximum expected acceleration, helps to scale the full range of the stick to the expected range of acceleration in-game
+//constexpr bool ANALOG_NUDGE_SEND_PEAKS                  = true;  // Whether to send peak values or waw values
+constexpr unsigned long ANALOG_NUDGE_REPORT_INTERVAL_MS = 10; // HID report interval for analog nudge in ms
+
+// Analog — acceleration pipeline
+constexpr uint16_t ANALOG_NUDGE_ACCELERATION_DEAD_ZONE = 100.0f; // Left-stick dead zone (filtered acceleration value)
+constexpr int16_t ANALOG_NUDGE_MAX_ACCELERATION        = 15000;  // Maximum expected acceleration, helps to scale the full range of the stick to the expected range of acceleration in-game
+
+// Analog — velocity pipeline
+constexpr float ANALOG_NUDGE_SAMPLE_RATE_HZ        = 400.0f; // Sensor sampling rate in Hz (MPU6050 @ DLPF_188 supports up to 1 kHz)
+constexpr float ANALOG_NUDGE_DC_ADAPT_TIME_S       = 0.200f; // DC removal adaptation time — 200-500 ms recommended by tech note
+constexpr float ANALOG_NUDGE_NOISE_ALPHA           = 0.4f;   // Noise low-pass filter weight (0 = heavy smoothing, 1 = no smoothing)
+constexpr float ANALOG_NUDGE_FRICTION_HALF_LIFE_S  = 2.0f;   // Velocity half-life in seconds — 2 s recommended by tech note
+constexpr float ANALOG_NUDGE_MAX_VELOCITY          = 200.0f; // Maximum expected velocity (LSB·s) for right-stick HID scaling
+constexpr uint16_t ANALOG_NUDGE_VELOCITY_DEAD_ZONE = 3.0f;   // Right-stick dead zone — friction already handles drift, keep at 0 unless noise remains (velocity value)
+
 
 // Digital
 constexpr uint16_t DIGITAL_NUDGE_SAMPLE_INTERVAL_MS = 10;      // Sampling interval for accelerometer readings (ms)
