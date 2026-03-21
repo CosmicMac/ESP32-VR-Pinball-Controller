@@ -23,7 +23,7 @@ static const uint8_t hidReportMapData[] = {
 
     // 6 simultaneous keys (keycode table)
     0x05, 0x07,               // Usage Page (Keyboard)
-    0x19, 0x00,               // Usage Minimum (0 = Aucun événement)
+    0x19, 0x00,               // Usage Minimum (0 = No events)
     0x29, 0xFF,               // Usage Maximum (0xFF)
     0x15, 0x00,               // Logical Minimum 0
     0x26, 0xFF, 0x00,         // Logical Maximum 0x00FF
@@ -82,22 +82,12 @@ static const uint8_t hidReportMapData[] = {
     0x95, 0x02,               // Report Count 2
     0x81, 0x02,               // Input (Data, Variable, Absolute)
 
-    // Z and Rz axes
+    // Triggers LT/RT: Z, Rz
     0x05, 0x01,               // Usage Page (Generic Desktop)
-    0x09, 0x32,               // Usage Z
-    0x09, 0x35,               // Usage Rz
-    0x16, 0x00, 0x80,         // Logical Min -32768
-    0x26, 0xFF, 0x7F,         // Logical Max 32767
-    0x75, 0x10,               // Report Size 16 bits
-    0x95, 0x02,               // Report Count 2
-    0x81, 0x02,               // Input (Data, Variable, Absolute)
-
-    // Gâchettes LT/RT
-    0x05, 0x02,               // Usage Page (Simulation Controls) ou autre, ici 0x02
-    0x09, 0xC5,               // Usage (Brake ou Trigger selon la table)
-    0x09, 0xC4,               // Usage (Accelerator / autre)
-    0x15, 0x00,               // Logical Min 0
-    0x26, 0xFF, 0x03,         // Logical Max 0x03FF (1023)
+    0x09, 0x32,               // Usage Z (LT)
+    0x09, 0x35,               // Usage Rz (RT)
+    0x15, 0x00,               // Logical Min -0
+    0x26, 0xFF, 0x03,         // Logical Max 1023
     0x75, 0x10,               // Report Size 16 bits
     0x95, 0x02,               // Report Count 2
     0x81, 0x02,               // Input (Data, Variable, Absolute)
@@ -172,7 +162,7 @@ void BleHidController::begin(const char* deviceName, const char* deviceManufactu
 
 void BleHidController::sendKeyboardState() {
     _kbInputReport->setValue(reinterpret_cast<uint8_t*>(&_kbState), sizeof(_kbState));
-    _kbInputReport->notify();
+    (void)_kbInputReport->notify();
 }
 
 /**
@@ -256,7 +246,7 @@ void BleHidController::keyReleaseAll() {
 void BleHidController::sendGamepadState() {
     if (!_deviceConnected || _gpInputReport == nullptr) return;
     _gpInputReport->setValue(reinterpret_cast<uint8_t*>(&_gpState), sizeof(_gpState));
-    _gpInputReport->notify();
+    (void)_gpInputReport->notify();
 }
 
 void BleHidController::buttonPress(const uint16_t button) {
@@ -288,16 +278,6 @@ void BleHidController::setLeftStick(const int16_t lx, const int16_t ly, const bo
 void BleHidController::setRightStick(const int16_t rx, const int16_t ry, const bool sendState) {
     _gpState.rightX = rx;
     _gpState.rightY = ry;
-    if (sendState) sendGamepadState();
-}
-
-void BleHidController::setZ(const int16_t z, const bool sendState) {
-    _gpState.z = z;
-    if (sendState) sendGamepadState();
-}
-
-void BleHidController::setRz(const int16_t rz, const bool sendState) {
-    _gpState.rz = rz;
     if (sendState) sendGamepadState();
 }
 

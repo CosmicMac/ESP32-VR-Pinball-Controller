@@ -1,5 +1,4 @@
 #pragma once
-#include <MPU6050.h>
 #include "BleHidController.h"
 
 // #########################################################
@@ -55,8 +54,8 @@ enum class ClassicBtn : uint16_t
     LAUNCH          = BTN_X,
     LEFT_FLIPPER    = BTN_LB,
     RIGHT_FLIPPER   = BTN_RB,
-    LEFT_MAGNASAVE  = BTN_LT,
-    RIGHT_MAGNASAVE = BTN_RT,
+    LEFT_MAGNASAVE  = TRIGGER_LEFT,
+    RIGHT_MAGNASAVE = TRIGGER_RIGHT,
     UP              = DPAD_UP,
     DOWN            = DPAD_DOWN,
     LEFT            = DPAD_LEFT,
@@ -129,28 +128,22 @@ constexpr uint16_t CONFIG_SAVE_INTERVAL_MS = 5000;                    // Interva
 // #########################################################
 // Nudge parameters
 // #########################################################
-
-// Analog
-constexpr uint16_t ANALOG_NUDGE_SAMPLE_RATE_HZ         = 400;   // Sensor sampling rate in Hz
-constexpr uint16_t ANALOG_NUDGE_REPORT_RATE_HZ         = 120;   // HID report rate in Hz
-constexpr uint16_t ANALOG_NUDGE_ACCELERATION_DEAD_ZONE = 100;   // Left stick dead zone (filtered acceleration value)
-constexpr uint16_t ANALOG_NUDGE_VELOCITY_DEAD_ZONE     = 3;     // Right stick dead zone (velocity value)
-constexpr uint16_t ANALOG_NUDGE_MAX_ACCELERATION       = 25000; // Maximum expected acceleration for left stick HID scaling (raw units) - Decrease if you want more sensitivity
-constexpr uint16_t ANALOG_NUDGE_MAX_VELOCITY           = 150;   // Maximum expected velocity for right stick HID scaling (mm/s) - Decrease if you want more sensitivity
-
-// Digital
-constexpr uint16_t DIGITAL_NUDGE_SAMPLE_INTERVAL_MS = 10;      // Sampling interval for accelerometer readings (ms)
-constexpr float DIGITAL_NUDGE_ALPHA                 = 0.4f;    // Low-pass filter weight
-constexpr float DIGITAL_NUDGE_THRESHOLD             = 3000.0f; // Trigger threshold
-constexpr float DIGITAL_NUDGE_RELEASE_THRESHOLD     = 1500.0f; // Release threshold (hysteresis)
-constexpr uint32_t DIGITAL_NUDGE_COOLDOWN_MS        = 200;     // Delay between two motion detections
-constexpr uint32_t DIGITAL_NUDGE_NUDGE_RESET_MS     = 50;      // Time to reset nudge to center
-
+constexpr uint16_t NUDGE_SAMPLE_RATE_HZ            = 400;  // Sensor sampling rate in Hz
+constexpr int NUDGE_JITTER_WINDOW                  = 800;  // Dead zone around zero (raw units) to filter out sensor noise
+constexpr uint16_t ANALOG_NUDGE_REPORT_RATE_HZ     = 120;  // HID report rate in Hz
+constexpr uint16_t ANALOG_NUDGE_MAX_ACCELERATION   = 7000; // Maximum expected acceleration for left stick HID scaling (raw units) - Decrease if you want more sensitivity (measured value: 25000)
+constexpr uint16_t ANALOG_NUDGE_MAX_VELOCITY       = 150;  // Maximum expected velocity for right stick HID scaling (mm/s) - Decrease if you want more sensitivity (measured value: 150)
+constexpr uint16_t DIGITAL_NUDGE_EVAL_RATE_HZ      = 50;   // Frequency to evaluate nudge state and trigger key events in Hz
+constexpr uint16_t DIGITAL_NUDGE_THRESHOLD         = 3000; // Trigger threshold
+constexpr uint16_t DIGITAL_NUDGE_RELEASE_THRESHOLD = 1500; // Release threshold (hysteresis)
+constexpr uint32_t DIGITAL_NUDGE_COOLDOWN_MS       = 200;  // Delay between two motion detections
+constexpr uint32_t DIGITAL_NUDGE_RESET_MS          = 50;   // Time to reset nudge to center
 
 // #########################################################
 // Calculated values from constants above (don't change)
 // #########################################################
-constexpr uint32_t ANALOG_NUDGE_SAMPLE_INTERVAL_US = static_cast<uint32_t>(1000000.0f / static_cast<float>(ANALOG_NUDGE_SAMPLE_RATE_HZ)); // Sensor sampling interval in microseconds
+constexpr uint32_t NUDGE_SAMPLE_INTERVAL_US        = static_cast<uint32_t>(1000000.0f / static_cast<float>(NUDGE_SAMPLE_RATE_HZ));        // Sensor sampling interval in microseconds
 constexpr uint32_t ANALOG_NUDGE_REPORT_INTERVAL_US = static_cast<uint32_t>(1000000.0f / static_cast<float>(ANALOG_NUDGE_REPORT_RATE_HZ)); // HID report interval in microseconds
-constexpr float ACC_SCALE                          = 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_ACCELERATION);
-constexpr float VEL_SCALE                          = 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_VELOCITY);
+constexpr uint32_t DIGITAL_NUDGE_EVAL_INTERVAL_US  = static_cast<uint32_t>(1000000.0f / static_cast<float>(DIGITAL_NUDGE_EVAL_RATE_HZ));  // Nudge state evaluation interval in microseconds
+constexpr float ANALOG_NUDGE_ACCELERATION_SCALE    = 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_ACCELERATION);
+constexpr float ANALOG_NUDGE_VELOCITY_SCALE        = 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_VELOCITY);

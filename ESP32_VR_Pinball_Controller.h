@@ -49,11 +49,47 @@ struct NudgeState
     uint8_t nudgeKey              = 0;
 };
 
+
+/**
+ * Jitter Filter (hysteresis window)
+ * Stabilizes a signal by absorbing small fluctuations within a sliding window
+ */
+struct JitterFilter
+{
+    int windowMin    = 0;
+    int windowMax    = 0;
+    bool initialized = false;
+
+    int process(int raw) {
+        if (!initialized) {
+            initialized = true;
+            windowMin   = raw;
+            windowMax   = raw;
+            return raw;
+        }
+        if (raw < windowMin) {
+            windowMin = raw;
+            windowMax = raw + NUDGE_JITTER_WINDOW;
+        }
+        else if (raw > windowMax) {
+            windowMax = raw;
+            windowMin = raw - NUDGE_JITTER_WINDOW;
+        }
+        return (windowMin + windowMax) / 2;
+    }
+
+    void reset(int raw) {
+        initialized = true;
+        windowMin   = raw;
+        windowMax   = raw;
+    }
+};
+
+
 struct NudgeProcess
 {
     // Filter parameters
     static constexpr float ACCEL_G_RANGE        = 2.0f;
-    static constexpr int JITTER_WINDOW          = 100;
     static constexpr float DC_ADAPT_TIME_s      = 0.3f; // DC removal adaptation time — 200-500 ms recommended
     static constexpr float FRICTION_HALF_LIFE_s = 2.0f; // Velocity half-life in seconds — 2 s recommended
 
@@ -61,33 +97,21 @@ struct NudgeProcess
     static constexpr float INV_DC_ADAPT_TIME      = 1.0f / DC_ADAPT_TIME_s;
     static constexpr float INV_FRICTION_HALF_LIFE = 1.0f / FRICTION_HALF_LIFE_s;
 
+    // Conversion factor for converting raw units to mm/s²
+    static constexpr float ACCEL_CONV_FACTOR = (ACCEL_G_RANGE / 32768.0f) * 9806.65f;
+
     // Internal state
     bool initialized    = false;
-    int windowMin       = 0;    // Jitter filter window minimum
-    int windowMax       = 0;    // Jitter filter window maximum
     float dcValue       = 0.0f; // DC Blocker (moving average)
     float acceleration  = 0.0f; // Filtered acceleration in raw sensor units
     float velocity      = 0.0f; // Integrated velocity in mm/s
     uint32_t lastMicros = 0;    // Timestamp of the last processed sample in microseconds
-
-    // Conversion factor for converting raw units to mm/s²
-    static constexpr float ACCEL_CONV_FACTOR = (ACCEL_G_RANGE / 32768.0f) * 9806.65f;
-
-    void reset() {
-        initialized  = false;
-        windowMin    = 0;
-        windowMax    = 0;
-        dcValue      = 0.0f;
-        acceleration = 0.0f;
-        velocity     = 0.0f;
-        lastMicros   = 0;
-    }
+    JitterFilter jitter;
 
     void process(int raw, uint32_t nowMicros) {
         if (!initialized) {
-            initialized  = true;
-            windowMin    = raw;
-            windowMax    = raw;
+            initialized = true;
+            jitter.reset(raw);
             dcValue      = static_cast<float>(raw);
             acceleration = 0.0f;
             velocity     = 0.0f;
@@ -99,24 +123,12 @@ struct NudgeProcess
         float dt = static_cast<float>(nowMicros - lastMicros) * 1e-6f;
 
         // Safety: Cap dt to prevent physics explosions if the loop lags significantly (e.g. > 100ms)
-        if (dt > 0.1f) {
-            dt = 0.1f;
-        }
+        if (dt > 0.1f) dt = 0.1f;
 
         lastMicros = nowMicros;
 
-        // Jitter Filter (Hysteresis)
-        // Stabilizes the signal before DC processing
-        if (raw < windowMin) {
-            windowMin = raw;
-            windowMax = raw + JITTER_WINDOW;
-        }
-        else if (raw > windowMax) {
-            windowMax = raw;
-            windowMin = raw - JITTER_WINDOW;
-        }
-
-        const int stable = (windowMin + windowMax) / 2;
+        // Jitter filter (hysteresis)
+        const int stable = jitter.process(raw);
 
         // Dynamic DC Blocker (Gravity/Tilt Cancellation)
         // Use dt for consistent scaling regardless of the sample rate
@@ -146,6 +158,7 @@ void setMode(ControllerMode newMode, bool initialConfig = false);
 void setLedColor(LedColor color);
 void setupAccelerometer();
 void readAccelRaw(int16_t& x, int16_t& y);
+bool sampleNudge();
 void handleAnalogNudge();
 void handleDigitalNudge();
 void performButtonAction(const ButtonAction& action, bool isPressed);
