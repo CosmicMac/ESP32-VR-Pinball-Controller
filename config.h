@@ -35,12 +35,8 @@ constexpr uint8_t I2C_SCL_PIN = 9; // I2C SCL pin
 // #########################################################
 // MPU6050 parameters
 // #########################################################
-constexpr uint16_t SENSOR_ROTATION = 90;                  // Rotation of the sensor on the horizontal plane (0, 90, 180, 270 degrees clockwise) ---
-constexpr uint8_t MPU6050_ADDR     = 0x68;                // MPU6050 I2C address
-constexpr uint8_t ACCEL_RANGE      = MPU6050_ACCEL_FS_2;  // Accelerometer range (±2g)
-constexpr uint8_t DLPF_MODE        = MPU6050_DLPF_BW_188; // Digital low-pass filter configuration (from 5 to 256 Hz, the fastest the noisiest), default : MPU6050_DLPF_BW_188
-constexpr uint32_t COOLDOWN_MS     = 200;                 // Delay between two motion detections
-constexpr uint32_t NUDGE_RESET_MS  = 50;                  // Time to reset nudge to center
+constexpr uint16_t SENSOR_ROTATION = 90;   // Rotation of the sensor on the horizontal plane (0, 90, 180, 270 degrees clockwise) ---
+constexpr uint8_t MPU6050_ADDR     = 0x68; // MPU6050 I2C address
 
 
 // #########################################################
@@ -59,8 +55,8 @@ enum class ClassicBtn : uint16_t
     LAUNCH          = BTN_X,
     LEFT_FLIPPER    = BTN_LB,
     RIGHT_FLIPPER   = BTN_RB,
-    LEFT_MAGNASAVE  = BTN_NONE,
-    RIGHT_MAGNASAVE = BTN_NONE,
+    LEFT_MAGNASAVE  = BTN_LT,
+    RIGHT_MAGNASAVE = BTN_RT,
     UP              = DPAD_UP,
     DOWN            = DPAD_DOWN,
     LEFT            = DPAD_LEFT,
@@ -135,24 +131,26 @@ constexpr uint16_t CONFIG_SAVE_INTERVAL_MS = 5000;                    // Interva
 // #########################################################
 
 // Analog
-//constexpr bool ANALOG_NUDGE_SEND_PEAKS                  = true;  // Whether to send peak values or waw values
-constexpr unsigned long ANALOG_NUDGE_REPORT_INTERVAL_MS = 10; // HID report interval for analog nudge in ms
-
-// Analog — acceleration pipeline
-constexpr uint16_t ANALOG_NUDGE_ACCELERATION_DEAD_ZONE = 100.0f; // Left-stick dead zone (filtered acceleration value)
-constexpr int16_t ANALOG_NUDGE_MAX_ACCELERATION        = 15000;  // Maximum expected acceleration, helps to scale the full range of the stick to the expected range of acceleration in-game
-
-// Analog — velocity pipeline
-constexpr float ANALOG_NUDGE_SAMPLE_RATE_HZ        = 400.0f; // Sensor sampling rate in Hz (MPU6050 @ DLPF_188 supports up to 1 kHz)
-constexpr float ANALOG_NUDGE_DC_ADAPT_TIME_S       = 0.200f; // DC removal adaptation time — 200-500 ms recommended by tech note
-constexpr float ANALOG_NUDGE_NOISE_ALPHA           = 0.4f;   // Noise low-pass filter weight (0 = heavy smoothing, 1 = no smoothing)
-constexpr float ANALOG_NUDGE_FRICTION_HALF_LIFE_S  = 2.0f;   // Velocity half-life in seconds — 2 s recommended by tech note
-constexpr float ANALOG_NUDGE_MAX_VELOCITY          = 200.0f; // Maximum expected velocity (LSB·s) for right-stick HID scaling
-constexpr uint16_t ANALOG_NUDGE_VELOCITY_DEAD_ZONE = 3.0f;   // Right-stick dead zone — friction already handles drift, keep at 0 unless noise remains (velocity value)
-
+constexpr uint16_t ANALOG_NUDGE_SAMPLE_RATE_HZ         = 400;   // Sensor sampling rate in Hz
+constexpr uint16_t ANALOG_NUDGE_REPORT_RATE_HZ         = 120;   // HID report rate in Hz
+constexpr uint16_t ANALOG_NUDGE_ACCELERATION_DEAD_ZONE = 100;   // Left stick dead zone (filtered acceleration value)
+constexpr uint16_t ANALOG_NUDGE_VELOCITY_DEAD_ZONE     = 3;     // Right stick dead zone (velocity value)
+constexpr uint16_t ANALOG_NUDGE_MAX_ACCELERATION       = 25000; // Maximum expected acceleration for left stick HID scaling (raw units) - Decrease if you want more sensitivity
+constexpr uint16_t ANALOG_NUDGE_MAX_VELOCITY           = 150;   // Maximum expected velocity for right stick HID scaling (mm/s) - Decrease if you want more sensitivity
 
 // Digital
 constexpr uint16_t DIGITAL_NUDGE_SAMPLE_INTERVAL_MS = 10;      // Sampling interval for accelerometer readings (ms)
 constexpr float DIGITAL_NUDGE_ALPHA                 = 0.4f;    // Low-pass filter weight
 constexpr float DIGITAL_NUDGE_THRESHOLD             = 3000.0f; // Trigger threshold
 constexpr float DIGITAL_NUDGE_RELEASE_THRESHOLD     = 1500.0f; // Release threshold (hysteresis)
+constexpr uint32_t DIGITAL_NUDGE_COOLDOWN_MS        = 200;     // Delay between two motion detections
+constexpr uint32_t DIGITAL_NUDGE_NUDGE_RESET_MS     = 50;      // Time to reset nudge to center
+
+
+// #########################################################
+// Calculated values from constants above (don't change)
+// #########################################################
+constexpr uint32_t ANALOG_NUDGE_SAMPLE_INTERVAL_US = static_cast<uint32_t>(1000000.0f / static_cast<float>(ANALOG_NUDGE_SAMPLE_RATE_HZ)); // Sensor sampling interval in microseconds
+constexpr uint32_t ANALOG_NUDGE_REPORT_INTERVAL_US = static_cast<uint32_t>(1000000.0f / static_cast<float>(ANALOG_NUDGE_REPORT_RATE_HZ)); // HID report interval in microseconds
+constexpr float ACC_SCALE                          = 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_ACCELERATION);
+constexpr float VEL_SCALE                          = 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_VELOCITY);

@@ -152,6 +152,8 @@ constexpr uint8_t PNP_VENDOR_SRC_USB = 0x02;
 #define BTN_HOME        0x1000
 #define BTN_LS          0x2000 // Left stick
 #define BTN_RS          0x4000 // Right stick
+#define BTN_LT          0x6000 // Left trigger
+#define BTN_RT          0x8000 // Right trigger
 
 // D-Pad
 #define DPAD_CENTERED   0x0F
@@ -178,7 +180,7 @@ public:
         uint16_t version               = 0x0100
     );
 
-    bool isConnected() const { return _deviceConnected; }
+    static bool isConnected() { return _deviceConnected; }
 
     // Keyboard API
     void keyModPress(uint8_t modifier);
@@ -195,6 +197,10 @@ public:
     void dpadRelease();
     void setLeftStick(int16_t lx, int16_t ly, bool sendState = true);
     void setRightStick(int16_t rx, int16_t ry, bool sendState = true);
+    void setZ(int16_t z, bool sendState = true);
+    void setRz(int16_t rz, bool sendState = true);
+    void setLeftTrigger(uint16_t lt, bool sendState = true);
+    void setRightTrigger(uint16_t rt, bool sendState = true);
     void sendGamepadState();
 
 private:
@@ -222,7 +228,9 @@ private:
         int16_t leftY    = 0;             // Left stick Y
         int16_t rightX   = 0;             // Right stick X
         int16_t rightY   = 0;             // Right stick Y
-        uint16_t lt      = 0;             // L eft trigger (0-1023), padding (8 bits)
+        int16_t z        = 0;             // LT
+        int16_t rz       = 0;             // RT
+        uint16_t lt      = 0;             // Left trigger (0-1023), padding (8 bits)
         uint16_t rt      = 0;             // Right trigger (0-1023), padding (8 bits)
     };
 
