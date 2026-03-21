@@ -144,7 +144,7 @@ void BleHidController::begin(const char* deviceName, const char* deviceManufactu
     _kbInputReport = _hidDevice->getInputReport(REPORT_ID_KEYBOARD);
     _gpInputReport = _hidDevice->getInputReport(REPORT_ID_GAMEPAD);
 
-    _hidDevice->startServices();
+    // _hidDevice->startServices(); // Deprecated: Services are now started by the server when start()
 
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     adv->setName(deviceName);

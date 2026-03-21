@@ -3,15 +3,12 @@
 A Bluetooth Low Energy (BLE) composite HID controller for VR pinball, with MPU6050 sensor for realistic nudging.
 
 ![VR Pinball controller](assets/vrpc.jpg)
-Literally a game changer! :star_struck:
 
-Keyboard or gamepad mode for compatibility across different games:
+HID Keyboard or gamepad mode for compatibility across different games:
 
 - Pinball FX VR (Meta Quest)
 - Pinball VR Classic (Meta Quest)
 - Visual Pinball X (PC)
-
-Easily adaptable to other games (as long as they support keyboard or gamepad input).
 
 ## Table of Contents
 
@@ -25,20 +22,23 @@ Easily adaptable to other games (as long as they support keyboard or gamepad inp
 
 ## Features
 
-- Composite BLE HID communication (keyboard + gamepad), now without relying on an external HID library
-- 11 buttons (Select, Start, Launch, A, B, X, Y, Left flipper, Left magnasave, Right flipper, Right magnasave)
+- Composite BLE HID communication (keyboard + gamepad) using the included HID library
+- 11 buttons (Select, Start, Launch, A, B, X, Y, Left flipper, Left MagnaSave, Right flipper, Right MagnaSave)
 - 4 D-pad input (to navigate in Pinball VR Classic menu)
 - 1 dedicated button for mode cycling (FX, Classic, VPX)
-- Nudge detection with direction analysis (MPU6050)
-- Optional RGB LED status indicator (when `RGB_BUILTIN` is available)
+- Nudge detection with MPU6050 accelerometer:
+    - Classic: analog nudge (acceleration sent on left stick)
+    - VPX: analog nudge (velocity sent on right stick)
+    - FX: digital nudge (peak detection)
+- RGB LED status indicator (when `RGB_BUILTIN` is available)
 
 ## Hardware Requirements
 
 ### Main Components
 
-- **ESP32-S3** development board (other ESP32 variants with BLE should work too, provided they have enough GPIO pins)
+- **ESP32-S3** development board (other ESP32 variants with BLE should work as well, provided they have enough GPIO pins)
 - **MPU6050** 6-axis accelerometer/gyroscope module (I²C interface)
-- **11 momentary push buttons** (fewer are required if you intend to use only FX & Classic)
+- **11 momentary push buttons** (fewer are required if you intend to use only FX or Classic modes)
 
 > [!TIP]
 > GoldLeaf Pushbuttons from Ultimarc are great for this purpose.
@@ -52,9 +52,7 @@ Easily adaptable to other games (as long as they support keyboard or gamepad inp
 #### I²C Connection (MPU6050)
 
 > [!IMPORTANT]
-> The current code is designed with inverted X and Y axes (rotated 90° to the left).  
-> The module must be oriented with the components facing up and the connectors on the
-> player's side (VCC pin on the left and interrupt pin on the right).
+> If the module is installed with the axes rotated, modify the SENSOR_ROTATION constant accordingly in `config.h`
 
 | MPU6050 pin | ESP32 pin | Description          |
 |-------------|-----------|----------------------|
@@ -79,9 +77,9 @@ Easily adaptable to other games (as long as they support keyboard or gamepad inp
 | Action X        | 7        |
 | Action Y        | 15       |
 | Left flipper    | 42       |
-| Left magnasave  | 41       |
+| Left MagnaSave  | 41       |
 | Right flipper   | 16       |
-| Right magnasave | 17       |
+| Right MagnaSave | 17       |
 | D-pad left      | 37       |
 | D-pad right     | 38       |
 | D-pad up        | 39       |
@@ -92,21 +90,18 @@ Easily adaptable to other games (as long as they support keyboard or gamepad inp
 
 ### Board
 
-#### ESP32 3.3.6 *by Espressif Systems*
+#### ESP32 3.3.7 *by Espressif Systems*
 
 - See https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html#board-manager-settings
-
-> [!CAUTION]
-> At the time of writing, ESP32 3.3.7 version seems incompatible with the NimBLE-Arduino library.
 
 ### Libraries
 
 - Go to "Tools" -> "Manage Libraries".
 
-#### NimBLE-Arduino 2.3.7 *by h2zero*
+#### NimBLE-Arduino 2.4.0 *by h2zero*
 
 - Click "Filter your search" and type "NimBLE-Arduino".
-- Select version `2.3.7` and click the "Install" button.
+- Select version `2.4.0` and click the "Install" button.
 
 #### MPU6050 library 1.4.4 *by Electronic Cats*
 
@@ -129,31 +124,18 @@ Easily adaptable to other games (as long as they support keyboard or gamepad inp
 ### Initial Setup
 
 1. Power on the ESP32
-2. Wait for the device to complete MPU6050 calibration (keep it still)
+2. Wait for the device to complete MPU6050 calibration (keep it stationary)
 3. On your VR headset or PC, pair with the BLE device named "VR Pinball controller"
 
 ### Mode Switching
 
-Hold the "Change mode" button to cycle between modes:
+Press the "Change mode" button to cycle between modes:
 
 - FX Mode (keyboard): RGB LED = Blue (like in key[B]oard)
 - Classic Mode (gamepad): RGB LED = Green (like in [G]amepad)
 - VPX Mode (keyboard): RGB LED = Purple (like in v[P]x)
 
 Mode is saved in EEPROM, so it will be restored on next boot.
-
-### Nudge Detection
-
-The MPU6050 detects table nudges via motion interrupt:
-
-1. Motion exceeds threshold → interrupt triggered
-2. Controller samples accelerometer 5 times
-3. Dominant axis determines nudge direction (left/right/forward)
-4. Controller sends nudge command to the game based on current mode
-    - **FX and VPX modes** → keyboard key
-    - **Classic mode:** → analog stick position
-5. Game interprets nudge command and applies appropriate in-game effect
-6. After 50ms, the input returns to neutral
 
 ## Troubleshooting
 
@@ -172,23 +154,26 @@ The MPU6050 detects table nudges via motion interrupt:
 ### Device Not Connecting
 
 - Verify that Bluetooth is enabled on your host device (Quest or PC)
-- Check that device "VR Pinball controller" appears in Bluetooth settings
+- Check that the device "VR Pinball controller" appears in your Bluetooth settings
 - Remove the previously paired device and restart Bluetooth on the host
 - Restart ESP32 and retry pairing
 
 ### MPU6050 Not Detected
 
 - Verify I²C wiring (SDA, SCL, VCC, GND)
-- Check MPU6050 address (default 0x68, some boards use 0x69)
-- Update MPU6050_ADDR constant if needed
+- Check the MPU6050 address (default is 0x68, some boards use 0x69)
+- Update the MPU6050_ADDR constant if needed
 
 ### Nudge Not Working Correctly
 
 - Ensure MPU_INT_PIN wiring is correct
-- Verify MPU6050 orientation matches the [documentation](#ic-connection-mpu6050).
-- Adjust MOTION_DETECTION_THRESHOLD in `config.h` if too sensitive or insensitive
+- Check that SENSOR_ROTATION value in `config.h` matches MPU6050 orientation
+- Adjust ANALOG_NUDGE_MAX_ACCELERATION (FX) or ANALOG_NUDGE_MAX_VELOCITY (Classic & VPX) in `config.h`
 
 ## Change Log
+
+- 2026-03-21
+    - Major code refactoring to handle analog nudge
 
 - 2026-02-28
     - Major code refactoring to get rid of the external HID library
