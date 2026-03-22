@@ -208,6 +208,9 @@ void setupAccelerometer() {
 
     // Initialize MPU6050
     mpu.initialize();
+    mpu.setDLPFMode(MPU6050_DLPF_BW_188); // DLPF bandwidth: 188Hz (allows up to 500Hz sample rate)
+    mpu.setRate(1);                       // Sample rate divider: 1kHz internal sample rate / (Sample rate divider + 1) = 500Hz
+
     if (!mpu.testConnection()) {
         Serial.println("MPU6050 connection failed!");
         return;
