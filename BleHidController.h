@@ -150,8 +150,6 @@ constexpr uint8_t PNP_VENDOR_SRC_USB = 0x02;
 #define BTN_SELECT      0x400
 #define BTN_START       0x800
 #define BTN_HOME        0x1000
-#define BTN_LS          0x2000 // Left stick
-#define BTN_RS          0x4000 // Right stick
 
 // D-Pad
 #define DPAD_CENTERED   0x0F
@@ -164,6 +162,10 @@ constexpr uint8_t PNP_VENDOR_SRC_USB = 0x02;
 #define DPAD_LEFT       0x06
 #define DPAD_UP_LEFT    0x07
 
+// Triggers (dummy codes for API, actual values are 0-1023 in the report)
+#define TRIGGER_LEFT    0x2000
+#define TRIGGER_RIGHT   0x4000
+
 
 class BleHidController
 {
@@ -173,12 +175,12 @@ public:
     void begin(
         const char* deviceName         = "BLE HID Controller",
         const char* deviceManufacturer = "CosmicMac",
-        uint16_t vendorId              = 0x045E, // Microsoft VID, for compatibility
-        uint16_t productId             = 0x0B13, // XBox Bluetooth gamepad PID, for compatibility
+        uint16_t vendorId              = 0x1234,
+        uint16_t productId             = 0x5678,
         uint16_t version               = 0x0100
     );
 
-    bool isConnected() const { return _deviceConnected; }
+    static bool isConnected() { return _deviceConnected; }
 
     // Keyboard API
     void keyModPress(uint8_t modifier);
@@ -193,10 +195,13 @@ public:
     void buttonRelease(uint16_t button);
     void dpadPress(uint8_t dpad);
     void dpadRelease();
-    void setLeftStick(int16_t lx, int16_t ly);
+    void setLeftStick(int16_t lx, int16_t ly, bool sendState = true);
+    void setRightStick(int16_t rx, int16_t ry, bool sendState = true);
+    void setLeftTrigger(uint16_t lt, bool sendState = true);
+    void setRightTrigger(uint16_t rt, bool sendState = true);
+    void sendGamepadState();
 
 private:
-    void sendGamepadState();
     void sendKeyboardState();
 
     struct KeyReport
@@ -217,12 +222,12 @@ private:
     {
         uint16_t buttons = 0;             // 16 buttons bitfield
         uint8_t dpad     = DPAD_CENTERED; // D-Pad 4 bits (up, right, down, left) + padding 4 bits
-        int16_t leftX    = 0;             // Left stick X
-        int16_t leftY    = 0;             // Left stick Y
-        int16_t rightX   = 0;             // Right stick X
-        int16_t rightY   = 0;             // Right stick Y
-        uint16_t lt      = 0;             // L eft trigger (0-255), padding (8 bits)
-        uint16_t rt      = 0;             // Right trigger (0-255), padding (8 bits)
+        int16_t leftX    = 0;             // Left stick X (X axis, -32768–32767)
+        int16_t leftY    = 0;             // Left stick Y (Y axis, -32768–32767)
+        int16_t rightX   = 0;             // Right stick X (Rx axis, -32768–32767)
+        int16_t rightY   = 0;             // Right stick Y (Ry axis, -32768–32767)
+        uint16_t lt      = 0;             // Left trigger  (Z  axis, 0–1023)
+        uint16_t rt      = 0;             // Right trigger (Rz axis, 0–1023)
     };
 
     static bool _deviceConnected;

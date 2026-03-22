@@ -5,6 +5,7 @@
 #include "ESP32_VR_Pinball_Controller.h"
 #include "config.h"
 
+// #define DEBUG_ANALOG_NUDGE
 
 // ###########################################################################
 // Array of button configurations
@@ -33,28 +34,20 @@ ButtonInfo buttons[NUM_BUTTONS] = {
 static_assert(NUM_BUTTONS == std::size(buttons), "NUM_BUTTONS mismatch");
 // ###########################################################################
 
-MPU6050 mpu;
+MPU6050 mpu(MPU6050_ADDR);
 BleHidController hid;
 Preferences config;
 NudgeState nudgeState;
 ControllerMode mode;
+NudgeProcess nudgeX, nudgeY; // Shared between analog and digital nudge handlers
 
-bool configChanged             = false; // Flag to indicate if the configuration has changed and needs to be saved
-unsigned long lastConfigChange = 0;     // Timestamp of the last configuration change, used to throttle flash writes
+bool configChanged        = false; // Flag to indicate if the configuration has changed and needs to be saved
+uint32_t lastConfigChange = 0;     // Timestamp of the last configuration change, used to throttle flash writes
 
 // ISR handlers
 volatile bool changeModeIRQ = false;
 static void IRAM_ATTR onChangeModeISR() { changeModeIRQ = true; }
 
-volatile bool motionIRQ = false;
-static void IRAM_ATTR onMotionISR() { motionIRQ = true; }
-
-
-// Calibration results (populated by calibrateSensor, used by handleNudgeDetection) //!HERE
-int16_t accelOffsetX = 0; // Mean X at rest (raw units)
-int16_t accelOffsetY = 0; // Mean Y at rest (raw units)
-float accelSigmaX    = 0; // Standard deviation X at rest
-float accelSigmaY    = 0; // Standard deviation Y at rest
 
 void setup() {
     Serial.begin(115200);
@@ -71,7 +64,7 @@ void setup() {
     }
 
     // Initialize HID
-    hid.begin(DEVICE_NAME, DEVICE_MANUFACTURER, 0x1234, 0x5678); //!HERE
+    hid.begin(DEVICE_NAME, DEVICE_MANUFACTURER);
 
     // Initialize accelerometer
     setupAccelerometer();
@@ -86,8 +79,17 @@ void setup() {
 void loop() {
     const auto currentMillis = millis();
 
+    // If change mode button was pressed, cycle through modes
+    if (changeModeIRQ) {
+        changeModeIRQ = false;
+        setMode(static_cast<ControllerMode>((static_cast<uint8_t>(mode) + 1) % static_cast<uint8_t>(ControllerMode::count)));
+    }
+
     // Save configuration if changed, regardless of BLE connection state
-    if (configChanged && (currentMillis - lastConfigChange > CONFIG_SAVE_INTERVAL_MS)) {
+    if (
+        configChanged &&
+        currentMillis - lastConfigChange > CONFIG_SAVE_INTERVAL_MS
+    ) {
         Serial.printf("[loop] Saving mode %d to flash...\n", mode);
         config.putUChar("mode", static_cast<uint8_t>(mode));
         Serial.println("[loop] Configuration saved!");
@@ -97,7 +99,7 @@ void loop() {
     // Check BLE connection state before processing inputs
     static bool wasConnected = true;
 
-    if (!hid.isConnected()) {
+    if (!BleHidController::isConnected()) {
         if (wasConnected) {
             wasConnected = false;
             setLedColor(LedColor::RED);
@@ -112,28 +114,22 @@ void loop() {
         setLedColor(MODE_COLORS[static_cast<uint8_t>(mode)]);
     }
 
-    // If change mode button was pressed, cycle through modes
-    if (changeModeIRQ == true) {
-        changeModeIRQ = false;
-        setMode(static_cast<ControllerMode>((static_cast<uint8_t>(mode) + 1) % static_cast<uint8_t>(ControllerMode::count)));
-    }
-
     // Handle nudge detection from accelerometer
-    handleNudgeDetection(currentMillis);
+    if (mode == ControllerMode::FX) {
+        handleDigitalNudge();
+    }
+    else {
+        handleAnalogNudge();
+    }
 
     // Handle button states
     for (auto& button : buttons) {
-        handleButton(button, currentMillis);
+        handleButton(button);
     }
 }
 
-/**
-* Handles the debouncing and state change of a single button
-*
-* @param button Reference to the ButtonInfo struct representing the button to handle
-* @param currentMillis Current time in milliseconds, used for debouncing logic
-*/
-void handleButton(ButtonInfo& button, const unsigned long currentMillis) {
+void handleButton(ButtonInfo& button) {
+    const auto currentMillis = millis();
     if (currentMillis - button.lastDebounceTime < BTN_DEBOUNCE_MS) {
         return;
     }
@@ -141,12 +137,7 @@ void handleButton(ButtonInfo& button, const unsigned long currentMillis) {
     if (const int reading = digitalRead(button.pin); reading != button.state) {
         button.state            = reading;
         button.lastDebounceTime = currentMillis;
-        if (button.state == LOW) {
-            performButtonAction(getButtonAction(button, mode), true);
-        }
-        else {
-            performButtonAction(getButtonAction(button, mode), false);
-        }
+        performButtonAction(getButtonAction(button), button.state == LOW);
     }
 }
 
@@ -157,9 +148,13 @@ void handleButton(ButtonInfo& button, const unsigned long currentMillis) {
  * @param initialConfig Indicates if this mode change is part of the initial configuration (true during setup) or a user-initiated change
  */
 void setMode(const ControllerMode newMode, const bool initialConfig) {
-    const unsigned long currentMillis   = millis();
-    static unsigned long lastChangeTime = 0;
-    if (!initialConfig && (currentMillis - lastChangeTime < 700)) return;
+    const uint32_t currentMillis   = millis();
+    static uint32_t lastChangeTime = 0;
+    if (
+        !initialConfig &&
+        currentMillis - lastChangeTime < 700
+    )
+        return;
     lastChangeTime = currentMillis;
 
     // Release all keys/buttons and reset dpad to centered before switching mode
@@ -171,7 +166,7 @@ void setMode(const ControllerMode newMode, const bool initialConfig) {
     setLedColor(MODE_COLORS[static_cast<uint8_t>(newMode)]);
 
     mode = newMode;
-    Serial.printf("[setMode] mode set to %d (initialConfig=%d)\n", static_cast<int>(mode), static_cast<int>(initialConfig));
+    Serial.printf("[setMode] mode set to %d (initialConfig=%d)\n", static_cast<int>(newMode), static_cast<int>(initialConfig));
     if (!initialConfig) {
         configChanged    = true;
         lastConfigChange = currentMillis;
@@ -204,209 +199,213 @@ void setLedColor(const LedColor color) {
  */
 void setupAccelerometer() {
     // Start I2C interface
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+    if (!Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN)) {
+        Serial.println("I2C init failed!");
+        return;
+    }
+
     Wire.setClock(400000); // Fast I²C
 
     // Initialize MPU6050
     mpu.initialize();
+    mpu.setDLPFMode(MPU6050_DLPF_BW_188); // DLPF bandwidth: 188Hz (allows up to 500Hz sample rate)
+    mpu.setRate(1);                       // Sample rate divider: 1kHz internal sample rate / (Sample rate divider + 1) = 500Hz
+
     if (!mpu.testConnection()) {
         Serial.println("MPU6050 connection failed!");
         return;
     }
-    mpu.setFullScaleAccelRange(ACCEL_RANGE);
-    mpu.setDLPFMode(DLPF_MODE);
-    mpu.setMotionDetectionThreshold(MOTION_DETECTION_THRESHOLD);
-    mpu.setMotionDetectionDuration(1);
-    mpu.setIntMotionEnabled(true);
 
-    pinMode(MPU_INT_PIN, INPUT);
-    attachInterrupt(digitalPinToInterrupt(MPU_INT_PIN), onMotionISR, RISING);
-
-    calibrateSensor();
-}
-
-
-/**
- * Calibrates the MPU6050 accelerometer
- *
- * @param samples The number of samples to collect for calibration
- */
-void calibrateSensor(const uint16_t samples) {
-    Serial.println("Auto calibration: don't touch the sensor...");
-
-    float sx = 0, sy = 0, sx2 = 0, sy2 = 0;
-
-    mpu.CalibrateAccel(20);
-    mpu.PrintActiveOffsets();
-
-    int16_t x, y;
-    uint16_t validSamples = 0;
-    for (uint16_t i = 0; i < samples; i++) {
-        if (!readAccelG(x, y)) continue;
-
-        sx += x;
-        sy += y;
-
-        sx2 += static_cast<float>(x) * x;
-        sy2 += static_cast<float>(y) * y;
-
-        validSamples++;
-
-        delay(2);
-    }
-
-    if (!validSamples) {
-        Serial.println("Calibration failed: no valid samples!");
-        return;
-    }
-
-    const float meanX = sx / validSamples;
-    const float meanY = sy / validSamples;
-
-    const float varX = sx2 / validSamples - meanX * meanX;
-    const float varY = sy2 / validSamples - meanY * meanY;
-
-    const float sigmaX = sqrtf(fmaxf(varX, 0.0f));
-    const float sigmaY = sqrtf(fmaxf(varY, 0.0f));
-
-    // Store calibration results for use in handleNudgeDetection
-    accelOffsetX = static_cast<int16_t>(meanX);
-    accelOffsetY = static_cast<int16_t>(meanY);
-    accelSigmaX  = sigmaX;
-    accelSigmaY  = sigmaY;
-
-    Serial.printf("Calibration done (%d samples)!\n", validSamples);
-    Serial.printf("Mean X/Y:\t\t%f\t\t%f\n", meanX, meanY);
-    Serial.printf("Sigma X/Y:\t\t%f\t\t%f\n", sigmaX, sigmaY);
+    Serial.println("Calibrating... Keep the MPU6050 sensor still.");
+    mpu.CalibrateAccel();
 }
 
 
 /**
  * Reads raw accelerometer values (X and Y axes) from the MPU6050 sensor
- *
- * @param[out] x Reference to store the X-axis accelerometer value
- * @param[out] y Reference to store the Y-axis accelerometer value
- * @return true if the read was successful and 4 bytes were received, false otherwise
+ * and apply the configured rotation to align with the physical orientation
+ * of the sensor
  */
-bool readAccelG(int16_t& x, int16_t& y) {
-    Wire.beginTransmission(MPU6050_ADDR);
-    Wire.write(ACCEL_XOUT_H);                                                       // Position the register pointer to the accelerometer X-axis high byte
-    if (Wire.endTransmission(false) != 0) return false;                             // End transmission but keep the connection active for reading
-    if (Wire.requestFrom(MPU6050_ADDR, static_cast<uint8_t>(4)) != 4) return false; // Request 4 bytes (X high, X low, Y high, Y low) and check that we received exactly 4 bytes
+void readAccelRaw(int16_t& x, int16_t& y) {
+    int16_t rawX, rawY, rawZ;
+    mpu.getAcceleration(&rawX, &rawY, &rawZ);
 
-    const uint8_t xh = Wire.read();
-    const uint8_t xl = Wire.read();
-    const uint8_t yh = Wire.read();
-    const uint8_t yl = Wire.read();
+    static_assert(SENSOR_ROTATION == 0 ||
+                  SENSOR_ROTATION == 90 ||
+                  SENSOR_ROTATION == 180 ||
+                  SENSOR_ROTATION == 270,
+                  "SENSOR_ROTATION must be 0, 90, 180 or 270");
 
-    x = static_cast<int16_t>((xh << 8) | xl);
-    y = static_cast<int16_t>((yh << 8) | yl);
+    //@formatter:off
+    if constexpr      (SENSOR_ROTATION ==  90) { x = rawY;                        y = static_cast<int16_t>(-rawX); }
+    else if constexpr (SENSOR_ROTATION == 180) { x = static_cast<int16_t>(-rawX); y = static_cast<int16_t>(-rawY); }
+    else if constexpr (SENSOR_ROTATION == 270) { x = static_cast<int16_t>(-rawY); y = rawX;  }
+    else                                       { x = rawX;                        y = rawY;  }
+    //@formatter:on
+}
+
+/**
+ * Samples the accelerometer at the configured rate and processes both axes
+ * through the shared NudgeProcess instances (jitter filter + DC blocker + velocity integration)
+ *
+ * @return true if a new sample was processed, false if the sampling interval has not elapsed yet
+ */
+bool sampleNudge() {
+    const uint32_t now = micros();
+
+    static uint32_t lastSampleMicros = 0;
+    if (now - lastSampleMicros < NUDGE_SAMPLE_INTERVAL_US) return false;
+    lastSampleMicros = now;
+
+    int16_t rx, ry;
+    readAccelRaw(rx, ry);
+    nudgeX.process(rx, now);
+    nudgeY.process(ry, now);
     return true;
 }
 
 /**
- * Reads multiple accelerometer samples and returns the peak X and Y values
- *
- * @return The peak X and Y values
+ * Handles analog nudge input for Classic and VPX modes by sampling the accelerometer
+ * and sending corresponding HID reports for the left (Classic) and right (VPX) sticks
  */
-AccelPeak getAccelPeak() {
-    int16_t x, y, maxX = 0, maxY    = 0;
-    uint16_t maxAbsX   = 0, maxAbsY = 0;
-    for (int i = 0; i < static_cast<int>(NUDGE_SAMPLES); i++) {
-        if (!readAccelG(x, y)) continue;
-        x -= accelOffsetX;
-        y -= accelOffsetY;
-        if (const uint16_t ax = abs(x); ax > maxAbsX) {
-            maxAbsX = ax;
-            maxX    = x;
-        }
-        if (const uint16_t ay = abs(y); ay > maxAbsY) {
-            maxAbsY = ay;
-            maxY    = y;
+void handleAnalogNudge() {
+    const uint32_t now = micros();
+
+    sampleNudge();
+
+    static uint32_t lastReportMicros = 0;
+
+    if (now - lastReportMicros < ANALOG_NUDGE_REPORT_INTERVAL_US) return;
+    lastReportMicros = now;
+
+    const float accX = nudgeX.acceleration;
+    const float accY = nudgeY.acceleration;
+    const float velX = nudgeX.velocity;
+    const float velY = nudgeY.velocity;
+
+    // Left stick: acceleration (Classic)
+    const int16_t leftX = static_cast<int16_t>(std::clamp(accX * ANALOG_NUDGE_ACCELERATION_SCALE, -32767.0f, 32767.0f));
+    const int16_t leftY = static_cast<int16_t>(std::clamp(accY * ANALOG_NUDGE_ACCELERATION_SCALE, -32767.0f, 32767.0f));
+
+    // Right stick: velocity (VPX)
+    const int16_t rightX = static_cast<int16_t>(std::clamp(velX * ANALOG_NUDGE_VELOCITY_SCALE, -32767.0f, 32767.0f));
+    const int16_t rightY = static_cast<int16_t>(std::clamp(velY * ANALOG_NUDGE_VELOCITY_SCALE, -32767.0f, 32767.0f));
+
+    // Send both axes together
+    hid.setLeftStick(leftX, leftY, false);
+    hid.setRightStick(rightX, rightY, false);
+    hid.sendGamepadState();
+
+#ifdef DEBUG_ANALOG_NUDGE
+    static uint32_t lastPrint = 0, lastReset = 0;
+
+    static float maxAccX     = 0.0f, maxAccY = 0.0f,
+                 maxVelX     = 0.0f, maxVelY = 0.0f;
+    static int16_t maxLeftX  = 0, maxLeftY   = 0,
+                   maxRightX = 0, maxRightY  = 0;
+
+    if (fabsf(nudgeX.acceleration) > fabsf(maxAccX)) maxAccX = nudgeX.acceleration;
+    if (fabsf(nudgeY.acceleration) > fabsf(maxAccY)) maxAccY = nudgeY.acceleration;
+
+    if (fabsf(nudgeX.velocity) > fabsf(maxVelX)) maxVelX = nudgeX.velocity;
+    if (fabsf(nudgeY.velocity) > fabsf(maxVelY)) maxVelY = nudgeY.velocity;
+
+    if (abs(leftX) > abs(maxLeftX)) maxLeftX = leftX;
+    if (abs(leftY) > abs(maxLeftY)) maxLeftY = leftY;
+
+    if (abs(rightX) > abs(maxRightX)) maxRightX = rightX;
+    if (abs(rightY) > abs(maxRightY)) maxRightY = rightY;
+
+    if (now - lastPrint > 1000000) {
+        Serial.printf(
+            "maxAcc[%7.1f, %7.1f] / maxVel[%7.1f, %7.1f] "
+            "*** maxLeft[%6d, %6d] / maxRight[%6d, %6d]\n",
+            maxAccX, maxAccY, maxVelX, maxVelY,
+            maxLeftX, maxLeftY, maxRightX, maxRightY);
+        lastPrint = now;
+
+        if (now - lastReset > 5000000) {
+            Serial.println("\nResetting debug counters...");
+            maxAccX   = 0.0f;
+            maxAccY   = 0.0f;
+            maxVelX   = 0.0f;
+            maxVelY   = 0.0f;
+            maxLeftX  = 0;
+            maxLeftY  = 0;
+            maxRightX = 0;
+            maxRightY = 0;
+            lastReset = now;
         }
     }
-    return {maxX, maxY};
+#endif
 }
 
-void handleNudgeDetection(const unsigned long currentMillis) {
-    if (motionIRQ) {
-        motionIRQ = false;
 
-        // Read the status to clear the MPU hardware interrupt and check that it is indeed a motion detection
-        if (!(mpu.getIntStatus() & 0x40)) return;
+/**
+ * Handles digital nudge input for FX by detecting when filtered accelerometer
+ * values exceed a threshold and sending corresponding key presses
+ */
+void handleDigitalNudge() {
+    const uint32_t now = micros();
 
-        if (currentMillis - nudgeState.lastNudgeMillis > COOLDOWN_MS) {
-            nudgeState.lastNudgeMillis = currentMillis;
-            nudgeState.isNudging       = true;
-            AccelPeak peak             = getAccelPeak();
-            Serial.printf("Max X/Y:\t%d\t\t%d\n", peak.x, peak.y);
+    static float peakX = 0.0f, peakY = 0.0f;
 
-            nudgeState.nudgeKey = 0;
-
-#if 0
-            // Ignore movements that are within sensor noise (3-sigma threshold)
-            const float noiseThreshX = 3.0f * accelSigmaX;
-            const float noiseThreshY = 3.0f * accelSigmaY;
-
-            if (abs(maxX) < noiseThreshX && abs(maxY) < noiseThreshY) {
-                Serial.println("Motion below noise threshold, ignoring");
-                nudgeState.isNudging = false;
-            }
-            else
-#endif
-
-            if (abs(peak.x) > abs(peak.y)) {
-                switch (mode) {
-                    //@formatter:off
-                    case ControllerMode::FX:      nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD); break;
-                    case ControllerMode::VPX:     nudgeState.nudgeKey = static_cast<uint8_t>(VpxNudgeKey::FORWARD); break;
-                    case ControllerMode::CLASSIC: hid.setLeftStick(0, INT16_MIN); break;
-                    default: break;
-                    //@formatter:on
-                }
-                Serial.println("Nudge up");
-            }
-            else {
-                int16_t nudgeY = peak.y;
-                if (nudgeY > 0) {
-                    switch (mode) {
-                        //@formatter:off
-                        case ControllerMode::FX:      nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::LEFT); break;
-                        case ControllerMode::VPX:     nudgeState.nudgeKey = static_cast<uint8_t>(VpxNudgeKey::LEFT); break;
-                        case ControllerMode::CLASSIC: hid.setLeftStick(INT16_MAX, 0); break;
-                        default: break;
-                        //@formatter:on
-                    }
-                    Serial.println("Nudge left");
-                }
-                else {
-                    switch (mode) {
-                        //@formatter:off
-                        case ControllerMode::FX:      nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::RIGHT); break;
-                        case ControllerMode::VPX:     nudgeState.nudgeKey = static_cast<uint8_t>(VpxNudgeKey::RIGHT); break;
-                        case ControllerMode::CLASSIC: hid.setLeftStick(INT16_MIN, 0); break;
-                        default: break;
-                        //@formatter:on
-                    }
-                    Serial.println("Nudge right");
-                }
-            }
-            if (nudgeState.nudgeKey != 0) hid.keyPress(nudgeState.nudgeKey);
-        }
+    // Accumulate peak acceleration for direction detection over the evaluation window
+    if (sampleNudge()) {
+        if (fabsf(nudgeX.acceleration) > fabsf(peakX)) peakX = nudgeX.acceleration;
+        if (fabsf(nudgeY.acceleration) > fabsf(peakY)) peakY = nudgeY.acceleration;
     }
 
-    else if (nudgeState.isNudging && (currentMillis - nudgeState.lastNudgeMillis > NUDGE_RESET_MS)) {
+    /**
+     * State evaluation
+     */
+    static uint32_t lastEvalMicros = 0;
+    if (now - lastEvalMicros < DIGITAL_NUDGE_EVAL_INTERVAL_US) return;
+    lastEvalMicros = now;
+
+    const float absPeakX      = fabsf(peakX);
+    const float absPeakY      = fabsf(peakY);
+    const bool aboveThreshold = absPeakX > static_cast<float>(DIGITAL_NUDGE_THRESHOLD) || absPeakY > static_cast<float>(DIGITAL_NUDGE_THRESHOLD);
+    const uint32_t nowMs      = millis();
+
+    // Nudge trigger
+    if (
+        aboveThreshold && !nudgeState.isNudging &&
+        nowMs - nudgeState.lastNudgeMillis > DIGITAL_NUDGE_COOLDOWN_MS
+    ) {
+        nudgeState.lastNudgeMillis = nowMs;
+        nudgeState.isNudging       = true;
+        nudgeState.nudgeKey        = 0;
+
+        // Determine nudge direction from the dominant peak axis
+        if (absPeakY >= absPeakX) {
+            if (peakY > 0) nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD);
+        }
+        else {
+            nudgeState.nudgeKey = static_cast<uint8_t>(peakX < 0 ? FxNudgeKey::LEFT : FxNudgeKey::RIGHT);
+        }
+        if (nudgeState.nudgeKey != 0) hid.keyPress(nudgeState.nudgeKey);
+    }
+    // Nudge release (hysteresis)
+    else if (
+        nudgeState.isNudging &&
+        absPeakX < static_cast<float>(DIGITAL_NUDGE_RELEASE_THRESHOLD) &&
+        absPeakY < static_cast<float>(DIGITAL_NUDGE_RELEASE_THRESHOLD) &&
+        nowMs - nudgeState.lastNudgeMillis > DIGITAL_NUDGE_RESET_MS
+    ) {
         nudgeState.isNudging = false;
         if (nudgeState.nudgeKey != 0) {
             hid.keyRelease(nudgeState.nudgeKey);
             nudgeState.nudgeKey = 0;
         }
-        else hid.setLeftStick(0, 0);
     }
+
+    // Reset peak accumulators for the next evaluation window
+    peakX = 0.0f;
+    peakY = 0.0f;
 }
 
-
-void performButtonAction(const ButtonAction& action, bool isPressed) {
+void performButtonAction(const ButtonAction& action, const bool isPressed) {
     switch (action.type) {
         //@formatter:off
         case ActionType::KEYBOARD_KEY:
@@ -421,7 +420,14 @@ void performButtonAction(const ButtonAction& action, bool isPressed) {
             if (isPressed)                  hid.dpadPress(action.dpadValue);
             else                            hid.dpadRelease();
             break;
-
+        case ActionType::GAMEPAD_LT:
+            if (isPressed)                  hid.setLeftTrigger(1023);
+            else                            hid.setLeftTrigger(0);
+            break;
+        case ActionType::GAMEPAD_RT:
+            if (isPressed)                  hid.setRightTrigger(1023);
+            else                            hid.setRightTrigger(0);
+            break;
         case ActionType::NONE:
         default:
             break;
@@ -429,15 +435,23 @@ void performButtonAction(const ButtonAction& action, bool isPressed) {
     }
 }
 
-ButtonAction getButtonAction(const ButtonInfo& button, ControllerMode mode) {
+ButtonAction getButtonAction(const ButtonInfo& button) {
     switch (mode) {
         //@formatter:off
-        case ControllerMode::FX:                    return {.type = ActionType::KEYBOARD_KEY, .keyCode = static_cast<uint8_t>(button.fxKey)};
-        case ControllerMode::VPX:                   return {.type = ActionType::KEYBOARD_KEY, .keyCode = static_cast<uint8_t>(button.vpxKey)};
+        case ControllerMode::FX:
+            return {.type = ActionType::KEYBOARD_KEY, .keyCode = static_cast<uint8_t>(button.fxKey)};
+        case ControllerMode::VPX:
+            return {.type = ActionType::KEYBOARD_KEY, .keyCode = static_cast<uint8_t>(button.vpxKey)};
         case ControllerMode::CLASSIC:
-            if (button.type == ButtonType::DPAD)    return {.type = ActionType::GAMEPAD_DPAD, .dpadValue = static_cast<uint8_t>(button.classicCode)};
-            else                                    return {.type = ActionType::GAMEPAD_BUTTON, .buttonCode = static_cast<uint16_t>(button.classicCode)};
-        default:                                    return {.type = ActionType::NONE};
+            if (button.type == ButtonType::DPAD)
+                return {.type = ActionType::GAMEPAD_DPAD, .dpadValue = static_cast<uint8_t>(button.classicCode)};
+            if (static_cast<uint16_t>(button.classicCode) == TRIGGER_LEFT)
+                return {.type = ActionType::GAMEPAD_LT};
+            if (static_cast<uint16_t>(button.classicCode) == TRIGGER_RIGHT)
+                return {.type = ActionType::GAMEPAD_RT};
+            return {.type = ActionType::GAMEPAD_BUTTON, .buttonCode = static_cast<uint16_t>(button.classicCode)};
+        default:
+            return {.type = ActionType::NONE};
         //@formatter:on
     }
 }
