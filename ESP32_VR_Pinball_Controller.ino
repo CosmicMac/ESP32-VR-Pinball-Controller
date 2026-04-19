@@ -90,7 +90,7 @@ void setup() {
 
     // Initialize change mode button
     pinMode(CHANGE_MODE_PIN, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(CHANGE_MODE_PIN), onChangeModeISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(CHANGE_MODE_PIN), onChangeModeISR, RISING);
 
     // Initialize HID
     hid.begin(DEVICE_NAME, DEVICE_MANUFACTURER);
