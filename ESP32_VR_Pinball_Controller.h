@@ -157,7 +157,7 @@ void handleButton(ButtonInfo& button);
 void setMode(ControllerMode newMode, bool initialConfig = false);
 void setLedColor(LedColor color);
 void setupAccelerometer();
-void readAccelRaw(int16_t& x, int16_t& y);
+bool readAccelRaw(int16_t& x, int16_t& y);
 bool sampleNudge();
 void handleAnalogNudge();
 void handleDigitalNudge();

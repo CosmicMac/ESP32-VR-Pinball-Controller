@@ -6,6 +6,8 @@
 // Make sure to connect one leg of each button to GND
 // and the other leg to the GPIO pin defined here
 // #########################################################
+
+// Buttons: connect one leg of each button to GND and the other leg to the GPIO pin
 constexpr uint8_t BTN_SELECT_PIN          = 1;  // "Select" button
 constexpr uint8_t BTN_START_PIN           = 2;  // "Start" button
 constexpr uint8_t BTN_LAUNCH_PIN          = 4;  // Launch button (plunger)
@@ -23,19 +25,28 @@ constexpr uint8_t DPAD_RIGHT_PIN          = 38; // D-Pad right button
 constexpr uint8_t DPAD_LEFT_PIN           = 37; // D-Pad left button
 constexpr uint8_t CHANGE_MODE_PIN         = 21; // Momentary button to cycle through controller modes (FX, Classic, VPX)
 
-
-// #########################################################
-// GPIO pins for MPU6050
-// #########################################################
+// Accelerometer
 constexpr uint8_t I2C_SDA_PIN = 8; // I2C SDA pin
 constexpr uint8_t I2C_SCL_PIN = 9; // I2C SCL pin
 
 
 // #########################################################
-// MPU6050 parameters
+// Accelerometer parameters
 // #########################################################
-constexpr uint16_t SENSOR_ROTATION = 90;   // Rotation of the sensor on the horizontal plane (0, 90, 180, 270 degrees clockwise) ---
-constexpr uint8_t MPU6050_ADDR     = 0x68; // MPU6050 I2C address
+constexpr uint8_t ACCEL_SENSOR_ADDR      = 0x68;  // I2C address
+constexpr uint16_t ACCEL_SENSOR_ROTATION = 90;    // Rotation of the sensor on the horizontal plane (0, 90, 180, 270 degrees counter clockwise)
+constexpr bool ACCEL_SENSOR_UPSIDEDOWN_X = false; // Sensor flipped around X axis, after rotation (Y and Z invert)
+constexpr bool ACCEL_SENSOR_UPSIDEDOWN_Y = true;  // Sensor flipped around Y axis, after rotation (X and Z invert)
+
+#define ACCEL_SENSOR_MPU6050    1
+#define ACCEL_SENSOR_LIS3DH     2
+#define ACCEL_SENSOR_TYPE       ACCEL_SENSOR_LIS3DH    // Change this single line to switch accelerometer
+
+#if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
+static constexpr float ACCEL_FULL_SCALE = 2048.0f; // 12-bit right-justified
+#else
+static constexpr float ACCEL_FULL_SCALE = 32768.0f; // 16-bit
+#endif
 
 
 // #########################################################
@@ -128,21 +139,35 @@ constexpr uint16_t CONFIG_SAVE_INTERVAL_MS = 5000;                    // Interva
 // #########################################################
 // Nudge parameters
 // #########################################################
-constexpr uint16_t NUDGE_SAMPLE_RATE_HZ            = 400;  // Sensor sampling rate in Hz
+#define DEBUG_ANALOG_NUDGE  true
+
+constexpr uint16_t NUDGE_SAMPLE_RATE_HZ        = 400; // Accelerometer sampling rate in Hz
+constexpr uint16_t ANALOG_NUDGE_REPORT_RATE_HZ = 120; // HID report rate in Hz
+
+#if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_MPU6050
 constexpr int NUDGE_JITTER_WINDOW                  = 800;  // Dead zone around zero (raw units) to filter out sensor noise
-constexpr uint16_t ANALOG_NUDGE_REPORT_RATE_HZ     = 120;  // HID report rate in Hz
-constexpr uint16_t ANALOG_NUDGE_MAX_ACCELERATION   = 7000; // Maximum expected acceleration for left stick HID scaling (raw units) - Decrease if you want more sensitivity (measured value: 25000)
-constexpr uint16_t ANALOG_NUDGE_MAX_VELOCITY       = 150;  // Maximum expected velocity for right stick HID scaling (mm/s) - Decrease if you want more sensitivity (measured value: 150)
+constexpr uint16_t ANALOG_NUDGE_MAX_ACCELERATION   = 7000; // Maximum expected acceleration for left stick HID scaling (raw units) - Decrease if you want more sensitivity
+constexpr uint16_t ANALOG_NUDGE_MAX_VELOCITY       = 150;  // Maximum expected velocity for right stick HID scaling (mm/s) - Decrease if you want more sensitivity
 constexpr uint16_t DIGITAL_NUDGE_EVAL_RATE_HZ      = 50;   // Frequency to evaluate nudge state and trigger key events in Hz
 constexpr uint16_t DIGITAL_NUDGE_THRESHOLD         = 3000; // Trigger threshold
 constexpr uint16_t DIGITAL_NUDGE_RELEASE_THRESHOLD = 1500; // Release threshold (hysteresis)
 constexpr uint32_t DIGITAL_NUDGE_COOLDOWN_MS       = 200;  // Delay between two motion detections
 constexpr uint32_t DIGITAL_NUDGE_RESET_MS          = 50;   // Time to reset nudge to center
+#elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
+constexpr int NUDGE_JITTER_WINDOW                  = 200;  // Dead zone around zero (raw units) to filter out sensor noise
+constexpr uint16_t ANALOG_NUDGE_MAX_ACCELERATION   = 700;  // Maximum expected acceleration for left stick HID scaling (raw units) - Decrease if you want more sensitivity !HERE
+constexpr uint16_t ANALOG_NUDGE_MAX_VELOCITY       = 10;   // Maximum expected velocity for right stick HID scaling (mm/s) - Decrease if you want more sensitivity !HERE
+constexpr uint16_t DIGITAL_NUDGE_EVAL_RATE_HZ      = 50;   // Frequency to evaluate nudge state and trigger key events in Hz
+constexpr uint16_t DIGITAL_NUDGE_THRESHOLD         = 300;  // Trigger threshold
+constexpr uint16_t DIGITAL_NUDGE_RELEASE_THRESHOLD = 150;  // Release threshold (hysteresis)
+constexpr uint32_t DIGITAL_NUDGE_COOLDOWN_MS       = 200;  // Delay between two motion detections
+constexpr uint32_t DIGITAL_NUDGE_RESET_MS          = 50;   // Time to reset nudge to center
+#endif
 
 // #########################################################
 // Calculated values from constants above (don't change)
 // #########################################################
-constexpr uint32_t NUDGE_SAMPLE_INTERVAL_US        = static_cast<uint32_t>(1000000.0f / static_cast<float>(NUDGE_SAMPLE_RATE_HZ));        // Sensor sampling interval in microseconds
+constexpr uint32_t NUDGE_SAMPLE_INTERVAL_US        = static_cast<uint32_t>(1000000.0f / static_cast<float>(NUDGE_SAMPLE_RATE_HZ));        // Accelerometer sampling interval in microseconds
 constexpr uint32_t ANALOG_NUDGE_REPORT_INTERVAL_US = static_cast<uint32_t>(1000000.0f / static_cast<float>(ANALOG_NUDGE_REPORT_RATE_HZ)); // HID report interval in microseconds
 constexpr uint32_t DIGITAL_NUDGE_EVAL_INTERVAL_US  = static_cast<uint32_t>(1000000.0f / static_cast<float>(DIGITAL_NUDGE_EVAL_RATE_HZ));  // Nudge state evaluation interval in microseconds
 constexpr float ANALOG_NUDGE_ACCELERATION_SCALE    = 32767.0f / static_cast<float>(ANALOG_NUDGE_MAX_ACCELERATION);

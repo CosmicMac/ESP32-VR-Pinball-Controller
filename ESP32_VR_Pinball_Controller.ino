@@ -1,11 +1,17 @@
 #include <Arduino.h>
 #include <Preferences.h>
-#include <MPU6050.h>
 #include "BleHidController.h"
 #include "ESP32_VR_Pinball_Controller.h"
 #include "config.h"
 
-// #define DEBUG_ANALOG_NUDGE
+#if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_MPU6050
+#include <MPU6050.h>
+MPU6050 mpu(ACCEL_SENSOR_ADDR);
+#elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
+#include <7Semi_LIS3DH.h>
+LIS3DH_7Semi Adx;
+#endif
+
 
 // ###########################################################################
 // Array of button configurations
@@ -34,7 +40,6 @@ ButtonInfo buttons[NUM_BUTTONS] = {
 static_assert(NUM_BUTTONS == std::size(buttons), "NUM_BUTTONS mismatch");
 // ###########################################################################
 
-MPU6050 mpu(MPU6050_ADDR);
 BleHidController hid;
 Preferences config;
 NudgeState nudgeState;
@@ -43,6 +48,10 @@ NudgeProcess nudgeX, nudgeY; // Shared between analog and digital nudge handlers
 
 bool configChanged        = false; // Flag to indicate if the configuration has changed and needs to be saved
 uint32_t lastConfigChange = 0;     // Timestamp of the last configuration change, used to throttle flash writes
+
+int16_t offsetX = 0;
+int16_t offsetY = 0;
+int16_t offsetZ = 0;
 
 // ISR handlers
 volatile bool changeModeIRQ = false;
@@ -90,7 +99,7 @@ void loop() {
         configChanged &&
         currentMillis - lastConfigChange > CONFIG_SAVE_INTERVAL_MS
     ) {
-        Serial.printf("[loop] Saving mode %d to flash...\n", mode);
+        Serial.printf("[loop] Saving mode %d to flash...\n", static_cast<int>(mode));
         config.putUChar("mode", static_cast<uint8_t>(mode));
         Serial.println("[loop] Configuration saved!");
         configChanged = false;
@@ -128,6 +137,18 @@ void loop() {
     }
 }
 
+/**
+ * Handle the state and debouncing of a button.
+ *
+ * This function processes the input from a specified button by checking its current
+ * state, applying a debounce mechanism, and invoking the appropriate action based
+ * on its state change. If the button's state differs from its previously recorded
+ * state and the debounce threshold has been satisfied, the button state is updated,
+ * and the corresponding action is executed.
+ *
+ * @param button A reference to a ButtonInfo object containing the button's information,
+ * including its pin, current state, and last debounce time.
+ */
 void handleButton(ButtonInfo& button) {
     const auto currentMillis = millis();
     if (currentMillis - button.lastDebounceTime < BTN_DEBOUNCE_MS) {
@@ -142,10 +163,22 @@ void handleButton(ButtonInfo& button) {
 }
 
 /**
- * Controller mode change handler
+ * Set the controller's operating mode and perform associated configurations.
  *
- * @param newMode The new controller mode to switch to
- * @param initialConfig Indicates if this mode change is part of the initial configuration (true during setup) or a user-initiated change
+ * This function updates the controller's mode to the specified value, performs any necessary
+ * cleanup for the current mode, and applies the settings for the new mode. If `initialConfig`
+ * is false, a debounce mechanism ensures that the mode cannot be changed more than once
+ * within a 700ms interval.
+ *
+ * When transitioning between modes (i.e., if `initialConfig` is false), all currently pressed
+ * keys or buttons are released, and the d-pad is reset to its centered position. The LED color
+ * is updated to reflect the new mode. Configuration change flags are marked if the mode change
+ * is not part of the initial configuration.
+ *
+ * @param newMode The desired new mode for the controller. Must be a valid value from the
+ * ControllerMode enumeration.
+ * @param initialConfig A boolean indicating whether this mode change is part of the initial
+ * configuration (true) or a runtime change initiated by user action (false).
  */
 void setMode(const ControllerMode newMode, const bool initialConfig) {
     const uint32_t currentMillis   = millis();
@@ -173,6 +206,21 @@ void setMode(const ControllerMode newMode, const bool initialConfig) {
     }
 }
 
+/**
+ * Set the color of the built-in RGB LED based on the specified color.
+ *
+ * This function updates the RGB LED's color using predefined brightness levels,
+ * allowing for different visual indications depending on the current color setting.
+ * The function relies on the RGB_BUILTIN macro to reference the built-in LED.
+ *
+ * Supported colors include:
+ * - OFF: Turns the LED off.
+ * - RED, GREEN, BLUE: Primary color settings.
+ * - YELLOW, PURPLE, CYAN, WHITE: Secondary and mixed color settings.
+ * - CLASSIC_MODE, FX_MODE, VPX_MODE: Modes associated with specific colors.
+ *
+ * @param color The desired LED color and/or mode. Must be one of the values defined in the LedColor enumeration.
+ */
 void setLedColor(const LedColor color) {
 #ifdef RGB_BUILTIN
     switch (color) {
@@ -195,7 +243,28 @@ void setLedColor(const LedColor color) {
 }
 
 /**
- * Initializes the MPU6050 accelerometer and configures its settings
+ * Setup and initialize the accelerometer based on the configured sensor type
+ *
+ * This function handles the initialization of the I2C interface, sets up
+ * the accelerometer hardware (either MPU6050 or LIS3DH, depending on the
+ * configured sensor type), and performs calibration if necessary.
+ *
+ * MPU6050-specific setup:
+ * - Configures the Digital Low Pass Filter (DLPF) and sampling rate for the MPU6050 sensor.
+ * - Verifies the sensor connection and runs an automatic calibration routine.
+ *
+ * LIS3DH-specific setup:
+ * - Initializes the LIS3DH accelerometer with specific parameters, such as range, data rate,
+ *   and resolution.
+ * - Performs a multi-step calibration that computes accelerometer offsets based on sample averages
+ *   before and after calibration.
+ *
+ * Calibration:
+ * - For the LIS3DH sensor, a pre-calibration sample average is computed, offsets are calculated from
+ *   a defined number of calibration samples, and a post-calibration average is used for verification.
+ *
+ * @note Ensure that the sensor remains stationary during calibration for accurate offset computation.
+ * @note The function uses delays during calibration to gather consistent sensor readings.
  */
 void setupAccelerometer() {
     // Start I2C interface
@@ -206,6 +275,7 @@ void setupAccelerometer() {
 
     Wire.setClock(400000); // Fast I²C
 
+#if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_MPU6050
     // Initialize MPU6050
     mpu.initialize();
     mpu.setDLPFMode(MPU6050_DLPF_BW_188); // DLPF bandwidth: 188Hz (allows up to 500Hz sample rate)
@@ -213,42 +283,157 @@ void setupAccelerometer() {
 
     if (!mpu.testConnection()) {
         Serial.println("MPU6050 connection failed!");
-        return;
+        while (true) delay(1000);
     }
 
     Serial.println("Calibrating... Keep the MPU6050 sensor still.");
     mpu.CalibrateAccel();
+#elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
+    // Initialize LIS3DH
+    if (!Adx.begin(Wire)) {
+        Serial.println("LIS3DH init failed!");
+        while (true) delay(1000);
+    }
+
+    Adx.setScale(RANGE_2G);
+    Adx.setDataRate(ODR_400HZ);
+    Adx.enableTemperature(false);
+    Adx.setHighResolution(true);
+
+    /**
+     * Calibration
+     */
+
+    constexpr uint8_t CALIB_SAMPLES   = 64; // Number of samples used for calibration
+    constexpr uint16_t CALIB_DELAY    = 10; // Delay (ms) between calibration samples
+    constexpr uint8_t PREVIEW_SAMPLES = 10;
+
+    int32_t preX = 0, preY = 0, preZ = 0;
+
+    uint8_t preCount = 0;
+
+    int16_t xRaw, yRaw, zRaw;
+
+    // Average of samples before calibration
+    for (uint8_t i = 0; i < PREVIEW_SAMPLES; i++) {
+        if (Adx.readAccel(xRaw, yRaw, zRaw)) {
+            preX += xRaw;
+            preY += yRaw;
+            preZ += zRaw;
+            preCount++;
+        }
+        delay(CALIB_DELAY);
+    }
+    if (preCount > 0) {
+        Serial.printf("Before calibration (avg %d samples) -> X: %d  Y: %d  Z: %d\n", preCount, preX / preCount, preY / preCount, preZ / preCount);
+    }
+
+    // Calibration: compute offsets over CALIB_SAMPLES readings
+    int32_t sumX  = 0, sumY = 0, sumZ = 0;
+    uint8_t count = 0;
+
+    // First pass: compute mean (offsets)
+    int16_t samples[CALIB_SAMPLES][3];
+    for (uint8_t i = 0; i < CALIB_SAMPLES; i++) {
+        if (Adx.readAccel(xRaw, yRaw, zRaw)) {
+            samples[count][0] = xRaw;
+            samples[count][1] = yRaw;
+            samples[count][2] = zRaw;
+            sumX              += xRaw;
+            sumY              += yRaw;
+            sumZ              += zRaw;
+            count++;
+        }
+        delay(CALIB_DELAY);
+    }
+
+    if (count > 0) {
+        offsetX = static_cast<int16_t>(sumX / count);
+        offsetY = static_cast<int16_t>(sumY / count);
+        offsetZ = static_cast<int16_t>(sumZ / count);
+    }
+
+    Serial.printf("Calibration done. Offsets -> X: %d  Y: %d  Z: %d\n", offsetX, offsetY, offsetZ);
+
+    // Average of samples after calibration
+    int32_t postX     = 0, postY = 0, postZ = 0;
+    uint8_t postCount = 0;
+
+    for (uint8_t i = 0; i < PREVIEW_SAMPLES; i++) {
+        if (Adx.readAccel(xRaw, yRaw, zRaw)) {
+            postX += xRaw - offsetX;
+            postY += yRaw - offsetY;
+            postZ += zRaw - offsetZ;
+            postCount++;
+        }
+        delay(CALIB_DELAY);
+    }
+    if (postCount > 0) {
+        Serial.printf("After calibration (avg %d samples) -> X: %d  Y: %d  Z: %d\n", postCount, postX / postCount, postY / postCount, postZ / postCount);
+    }
+
+#endif
 }
 
 
 /**
- * Reads raw accelerometer values (X and Y axes) from the MPU6050 sensor
- * and apply the configured rotation to align with the physical orientation
- * of the sensor
- */
-void readAccelRaw(int16_t& x, int16_t& y) {
-    int16_t rawX, rawY, rawZ;
-    mpu.getAcceleration(&rawX, &rawY, &rawZ);
-
-    static_assert(SENSOR_ROTATION == 0 ||
-                  SENSOR_ROTATION == 90 ||
-                  SENSOR_ROTATION == 180 ||
-                  SENSOR_ROTATION == 270,
-                  "SENSOR_ROTATION must be 0, 90, 180 or 270");
-
-    //@formatter:off
-    if constexpr      (SENSOR_ROTATION ==  90) { x = rawY;                        y = static_cast<int16_t>(-rawX); }
-    else if constexpr (SENSOR_ROTATION == 180) { x = static_cast<int16_t>(-rawX); y = static_cast<int16_t>(-rawY); }
-    else if constexpr (SENSOR_ROTATION == 270) { x = static_cast<int16_t>(-rawY); y = rawX;  }
-    else                                       { x = rawX;                        y = rawY;  }
-    //@formatter:on
-}
-
-/**
- * Samples the accelerometer at the configured rate and processes both axes
- * through the shared NudgeProcess instances (jitter filter + DC blocker + velocity integration)
+ * Reads raw acceleration values from the sensor and applies calibration, rotation, and flip adjustments.
  *
- * @return true if a new sample was processed, false if the sampling interval has not elapsed yet
+ * This function retrieves raw X, Y, and Z axis acceleration values from the selected sensor
+ * and adjusts them based on predefined offsets, rotation, and axis flipping configurations.
+ *
+ * @param xr Reference to store the calibrated and adjusted X-axis acceleration
+ * @param yr Reference to store the calibrated and adjusted Y-axis acceleration
+ * @return True if the acceleration values are successfully read and adjusted; false otherwise
+ */
+bool readAccelRaw(int16_t& xr, int16_t& yr) {
+    int16_t x, y, z;
+
+#if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_MPU6050
+    mpu.getAcceleration(&x, &y, &z);
+#elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
+    if (!Adx.readAccel(x, y, z)) {
+        return false;
+    }
+#endif
+
+    // Apply offsets
+    x -= offsetX;
+    y -= offsetY;
+    //z -= offsetZ;
+
+    // Rotation around Z axis (CCW, viewed from +Z)
+    // zr = z;
+    switch (ACCEL_SENSOR_ROTATION) {
+        //@formatter:off
+        case 0:     xr = x;     yr = y;     break;
+        case 90:    xr = -y;    yr = x;     break; // 90° CCW: X -> -Y, Y -> X
+        case 180:   xr = -x;    yr = -y;    break; // 180°: X -> -X, Y -> -Y
+        case 270:   xr = y;     yr = -x;    break; // 270° CCW (90° CW): X -> Y, Y -> -X
+        default:    xr = x;     yr = y;     break; // Unsupported angle → no rotation
+        //@formatter:on
+    }
+
+    // Apply flips (after rotation)
+    if (ACCEL_SENSOR_UPSIDEDOWN_X) {
+        // Flip around X: Y and Z invert
+        yr = -yr;
+        // zr = -zr;
+    }
+    if (ACCEL_SENSOR_UPSIDEDOWN_Y) {
+        // Flip around Y: X and Z invert
+        xr = -xr;
+        // zr = -zr;
+    }
+    return true;
+}
+
+
+/**
+ * Processes input from the accelerometer at a defined sampling interval
+ * and updates the nudge subsystem with the latest raw acceleration values.
+ *
+ * @return true if a new sample was read and processed, false if the sampling interval has not yet elapsed
  */
 bool sampleNudge() {
     const uint32_t now = micros();
@@ -265,8 +450,16 @@ bool sampleNudge() {
 }
 
 /**
- * Handles analog nudge input for Classic and VPX modes by sampling the accelerometer
- * and sending corresponding HID reports for the left (Classic) and right (VPX) sticks
+ * Handles processing of analog nudge inputs and updates gamepad stick positions.
+ *
+ * This method samples acceleration and velocity data for both X and Y axes from
+ * the nudge sensors, processes them into scaled stick values, and sends the updated
+ * state to the BLE HID controller. It incorporates timing constraints to regulate
+ * the frequency of stick updates.
+ *
+ * If debugging is enabled, this method logs the maximum acceleration, velocity,
+ * and stick values observed over specified intervals, with the ability to periodically
+ * reset these counters.
  */
 void handleAnalogNudge() {
     const uint32_t now = micros();
@@ -319,7 +512,7 @@ void handleAnalogNudge() {
     if (now - lastPrint > 1000000) {
         Serial.printf(
             "maxAcc[%7.1f, %7.1f] / maxVel[%7.1f, %7.1f] "
-            "*** maxLeft[%6d, %6d] / maxRight[%6d, %6d]\n",
+            "*** maxLeftStick[%6d, %6d] / maxRightStick[%6d, %6d]\n",
             maxAccX, maxAccY, maxVelX, maxVelY,
             maxLeftX, maxLeftY, maxRightX, maxRightY);
         lastPrint = now;
@@ -342,8 +535,23 @@ void handleAnalogNudge() {
 
 
 /**
- * Handles digital nudge input for FX by detecting when filtered accelerometer
- * values exceed a threshold and sending corresponding key presses
+ * Processes digital nudge inputs for directional detection and state management.
+ *
+ * This method evaluates acceleration data sampled over a defined window to
+ * detect peak values in both X and Y axes and determines if a nudge input exceeds
+ * the configured threshold. Based on the dominant axis, it triggers a corresponding
+ * directional key press and manages nudge release state with hysteresis.
+ *
+ * Key features include:
+ * - Directional detection using peak acceleration values.
+ * - Cooldown and reset intervals for stable nudge state transitions.
+ * - Integration with HID controller for key press/release events.
+ *
+ * State and calculation flow:
+ * 1. Accumulate peak values during sampling intervals.
+ * 2. Evaluate state after a defined evaluation interval.
+ * 3. Trigger nudge key events when conditions are met.
+ * 4. Handle release hysteresis to reset the nudge state when thresholds are below the release limit.
  */
 void handleDigitalNudge() {
     const uint32_t now = micros();
@@ -367,6 +575,9 @@ void handleDigitalNudge() {
     const float absPeakY      = fabsf(peakY);
     const bool aboveThreshold = absPeakX > static_cast<float>(DIGITAL_NUDGE_THRESHOLD) || absPeakY > static_cast<float>(DIGITAL_NUDGE_THRESHOLD);
     const uint32_t nowMs      = millis();
+
+    // !HERE
+    Serial.printf("[DEBUG] peakX=%.1f, peakY=%.1f, threshold=%d, isNudging=%d\n", absPeakX, absPeakY, DIGITAL_NUDGE_THRESHOLD, nudgeState.isNudging);
 
     // Nudge trigger
     if (
@@ -405,6 +616,12 @@ void handleDigitalNudge() {
     peakY = 0.0f;
 }
 
+/**
+ * Executes the specified button action based on the given input state.
+ *
+ * @param action A reference to the ButtonAction object, specifying the type of action and associated data such as key code, button code, or dpad value.
+ * @param isPressed A boolean indicating whether the button is currently pressed (true) or released (false).
+ */
 void performButtonAction(const ButtonAction& action, const bool isPressed) {
     switch (action.type) {
         //@formatter:off
@@ -435,6 +652,13 @@ void performButtonAction(const ButtonAction& action, const bool isPressed) {
     }
 }
 
+
+/**
+ * Determines the appropriate button action based on the current controller mode and button information.
+ *
+ * @param button Reference to the ButtonInfo object containing button-specific data, such as button type and associated codes for each controller mode.
+ * @return A ButtonAction object representing the action to be performed, including the action type and any specific parameters (e.g., keyCode, dpadValue, buttonCode) required for the action.
+ */
 ButtonAction getButtonAction(const ButtonInfo& button) {
     switch (mode) {
         //@formatter:off
