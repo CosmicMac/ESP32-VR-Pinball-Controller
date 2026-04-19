@@ -98,7 +98,7 @@ struct NudgeProcess
     static constexpr float INV_FRICTION_HALF_LIFE = 1.0f / FRICTION_HALF_LIFE_s;
 
     // Conversion factor for converting raw units to mm/s²
-    static constexpr float ACCEL_CONV_FACTOR = (ACCEL_G_RANGE / 32768.0f) * 9806.65f;
+    static constexpr float ACCEL_CONV_FACTOR = (ACCEL_G_RANGE / ACCEL_FULL_SCALE) * 9806.65f;
 
     // Internal state
     bool initialized    = false;
@@ -163,3 +163,6 @@ void handleAnalogNudge();
 void handleDigitalNudge();
 void performButtonAction(const ButtonAction& action, bool isPressed);
 ButtonAction getButtonAction(const ButtonInfo& button);
+void sendGamepadReport();
+void setupPlunger();
+void handlePlunger();

@@ -226,8 +226,8 @@ private:
         int16_t leftY    = 0;             // Left stick Y (Y axis, -32768–32767)
         int16_t rightX   = 0;             // Right stick X (Rx axis, -32768–32767)
         int16_t rightY   = 0;             // Right stick Y (Ry axis, -32768–32767)
-        uint16_t lt      = 0;             // Left trigger  (Z  axis, 0–1023)
-        uint16_t rt      = 0;             // Right trigger (Rz axis, 0–1023)
+        uint16_t lt      = 0;             // Left trigger  (Z  axis, 0–32767)
+        uint16_t rt      = 0;             // Right trigger (Rz axis, 0–32767)
     };
 
     static bool _deviceConnected;

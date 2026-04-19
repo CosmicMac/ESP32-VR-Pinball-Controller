@@ -134,13 +134,12 @@ constexpr auto DEVICE_NAME                 = "VR Pinball controller"; // BLE dev
 constexpr auto DEVICE_MANUFACTURER         = "CosmicMac";             // BLE device manufacturer
 constexpr uint8_t BTN_DEBOUNCE_MS          = 10;                      // Debounce delay for buttons in ms
 constexpr uint16_t CONFIG_SAVE_INTERVAL_MS = 5000;                    // Interval to save configuration to flash in ms
+constexpr uint16_t GAMEPAD_REPORT_RATE_HZ  = 120;                     // HID report rate for gamepad state in Hz
 
 
 // #########################################################
 // Nudge parameters
 // #########################################################
-#define DEBUG_ANALOG_NUDGE  true
-
 constexpr uint16_t NUDGE_SAMPLE_RATE_HZ        = 400; // Accelerometer sampling rate in Hz
 constexpr uint16_t ANALOG_NUDGE_REPORT_RATE_HZ = 120; // HID report rate in Hz
 
@@ -154,19 +153,30 @@ constexpr uint16_t DIGITAL_NUDGE_RELEASE_THRESHOLD = 1500; // Release threshold 
 constexpr uint32_t DIGITAL_NUDGE_COOLDOWN_MS       = 200;  // Delay between two motion detections
 constexpr uint32_t DIGITAL_NUDGE_RESET_MS          = 50;   // Time to reset nudge to center
 #elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
-constexpr int NUDGE_JITTER_WINDOW                  = 200;  // Dead zone around zero (raw units) to filter out sensor noise
-constexpr uint16_t ANALOG_NUDGE_MAX_ACCELERATION   = 700;  // Maximum expected acceleration for left stick HID scaling (raw units) - Decrease if you want more sensitivity !HERE
-constexpr uint16_t ANALOG_NUDGE_MAX_VELOCITY       = 10;   // Maximum expected velocity for right stick HID scaling (mm/s) - Decrease if you want more sensitivity !HERE
-constexpr uint16_t DIGITAL_NUDGE_EVAL_RATE_HZ      = 50;   // Frequency to evaluate nudge state and trigger key events in Hz
-constexpr uint16_t DIGITAL_NUDGE_THRESHOLD         = 300;  // Trigger threshold
-constexpr uint16_t DIGITAL_NUDGE_RELEASE_THRESHOLD = 150;  // Release threshold (hysteresis)
-constexpr uint32_t DIGITAL_NUDGE_COOLDOWN_MS       = 200;  // Delay between two motion detections
-constexpr uint32_t DIGITAL_NUDGE_RESET_MS          = 50;   // Time to reset nudge to center
+constexpr int NUDGE_JITTER_WINDOW                  = 200; // Dead zone around zero (raw units) to filter out sensor noise
+constexpr uint16_t ANALOG_NUDGE_MAX_ACCELERATION   = 700; // Maximum expected acceleration for left stick HID scaling (raw units) - Decrease if you want more sensitivity !HERE
+constexpr uint16_t ANALOG_NUDGE_MAX_VELOCITY       = 10;  // Maximum expected velocity for right stick HID scaling (mm/s) - Decrease if you want more sensitivity !HERE
+constexpr uint16_t DIGITAL_NUDGE_EVAL_RATE_HZ      = 50;  // Frequency to evaluate nudge state and trigger key events in Hz
+constexpr uint16_t DIGITAL_NUDGE_THRESHOLD         = 300; // Trigger threshold
+constexpr uint16_t DIGITAL_NUDGE_RELEASE_THRESHOLD = 150; // Release threshold (hysteresis)
+constexpr uint32_t DIGITAL_NUDGE_COOLDOWN_MS       = 200; // Delay between two motion detections
+constexpr uint32_t DIGITAL_NUDGE_RESET_MS          = 50;  // Time to reset nudge to center
 #endif
+
+
+// #########################################################
+// Plunger parameters
+// #########################################################
+constexpr bool PLUNGER_ENABLED       = true;
+constexpr uint8_t PLUNGER_PIN        = 14;    // ADC pin (GPIO14 = ADC2_CH3)
+constexpr float PLUNGER_FILTER_ALPHA = 0.05f; // Lower = more stable
+constexpr float PLUNGER_DEAD_ZONE    = 0.03f; // ±3% dead zone around center
+
 
 // #########################################################
 // Calculated values from constants above (don't change)
 // #########################################################
+constexpr uint32_t GAMEPAD_REPORT_INTERVAL_US      = static_cast<uint32_t>(1000000.0f / static_cast<float>(GAMEPAD_REPORT_RATE_HZ));      // HID report interval for gamepad state in microseconds
 constexpr uint32_t NUDGE_SAMPLE_INTERVAL_US        = static_cast<uint32_t>(1000000.0f / static_cast<float>(NUDGE_SAMPLE_RATE_HZ));        // Accelerometer sampling interval in microseconds
 constexpr uint32_t ANALOG_NUDGE_REPORT_INTERVAL_US = static_cast<uint32_t>(1000000.0f / static_cast<float>(ANALOG_NUDGE_REPORT_RATE_HZ)); // HID report interval in microseconds
 constexpr uint32_t DIGITAL_NUDGE_EVAL_INTERVAL_US  = static_cast<uint32_t>(1000000.0f / static_cast<float>(DIGITAL_NUDGE_EVAL_RATE_HZ));  // Nudge state evaluation interval in microseconds

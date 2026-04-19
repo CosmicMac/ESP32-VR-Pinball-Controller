@@ -12,6 +12,7 @@ MPU6050 mpu(ACCEL_SENSOR_ADDR);
 LIS3DH_7Semi Adx;
 #endif
 
+bool DEBUG_MODE = false; // Press button Y on start to activate debug mode
 
 // ###########################################################################
 // Array of button configurations
@@ -53,6 +54,11 @@ int16_t offsetX = 0;
 int16_t offsetY = 0;
 int16_t offsetZ = 0;
 
+// Plunger state
+float plungerFiltered         = 0.0f;
+int plungerMinVal             = 4095; // Will be calculated during initialization
+constexpr int PLUNGER_MAX_VAL = 4095;
+
 // ISR handlers
 volatile bool changeModeIRQ = false;
 static void IRAM_ATTR onChangeModeISR() { changeModeIRQ = true; }
@@ -63,20 +69,37 @@ void setup() {
 
     setLedColor(LedColor::RED);
 
-    // Initialize change mode button
-    pinMode(CHANGE_MODE_PIN, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(CHANGE_MODE_PIN), onChangeModeISR, RISING);
-
     // Initialize buttons
     for (const auto& button : buttons) {
         pinMode(button.pin, INPUT_PULLUP);
     }
+
+    if (digitalRead(BTN_Y_PIN) == LOW) {
+        DEBUG_MODE = true;
+        Serial.println("[setup] Debug mode activated!");
+#ifdef RGB_BUILTIN
+        for (int i = 0; i < 3; ++i) {
+            setLedColor(LedColor::WHITE);
+            delay(200);
+            setLedColor(LedColor::OFF);
+            delay(200);
+        }
+        setLedColor(LedColor::RED);
+#endif
+    }
+
+    // Initialize change mode button
+    pinMode(CHANGE_MODE_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(CHANGE_MODE_PIN), onChangeModeISR, FALLING);
 
     // Initialize HID
     hid.begin(DEVICE_NAME, DEVICE_MANUFACTURER);
 
     // Initialize accelerometer
     setupAccelerometer();
+
+    // Initialize plunger
+    setupPlunger();
 
     // Load saved mode
     config.begin("ctrl_cfg", false);
@@ -130,6 +153,10 @@ void loop() {
     else {
         handleAnalogNudge();
     }
+
+    handlePlunger();
+
+    sendGamepadReport();
 
     // Handle button states
     for (auto& button : buttons) {
@@ -443,9 +470,12 @@ bool sampleNudge() {
     lastSampleMicros = now;
 
     int16_t rx, ry;
-    readAccelRaw(rx, ry);
-    nudgeX.process(rx, now);
-    nudgeY.process(ry, now);
+
+    if (readAccelRaw(rx, ry)) {
+        nudgeX.process(rx, now);
+        nudgeY.process(ry, now);
+    }
+
     return true;
 }
 
@@ -487,50 +517,50 @@ void handleAnalogNudge() {
     // Send both axes together
     hid.setLeftStick(leftX, leftY, false);
     hid.setRightStick(rightX, rightY, false);
-    hid.sendGamepadState();
+    // hid.sendGamepadState();
 
-#ifdef DEBUG_ANALOG_NUDGE
-    static uint32_t lastPrint = 0, lastReset = 0;
+    if (DEBUG_MODE) {
+        static uint32_t lastPrint = 0, lastReset = 0;
 
-    static float maxAccX     = 0.0f, maxAccY = 0.0f,
-                 maxVelX     = 0.0f, maxVelY = 0.0f;
-    static int16_t maxLeftX  = 0, maxLeftY   = 0,
-                   maxRightX = 0, maxRightY  = 0;
+        static float maxAccX     = 0.0f, maxAccY = 0.0f,
+                     maxVelX     = 0.0f, maxVelY = 0.0f;
+        static int16_t maxLeftX  = 0, maxLeftY   = 0,
+                       maxRightX = 0, maxRightY  = 0;
 
-    if (fabsf(nudgeX.acceleration) > fabsf(maxAccX)) maxAccX = nudgeX.acceleration;
-    if (fabsf(nudgeY.acceleration) > fabsf(maxAccY)) maxAccY = nudgeY.acceleration;
+        if (fabsf(nudgeX.acceleration) > fabsf(maxAccX)) maxAccX = nudgeX.acceleration;
+        if (fabsf(nudgeY.acceleration) > fabsf(maxAccY)) maxAccY = nudgeY.acceleration;
 
-    if (fabsf(nudgeX.velocity) > fabsf(maxVelX)) maxVelX = nudgeX.velocity;
-    if (fabsf(nudgeY.velocity) > fabsf(maxVelY)) maxVelY = nudgeY.velocity;
+        if (fabsf(nudgeX.velocity) > fabsf(maxVelX)) maxVelX = nudgeX.velocity;
+        if (fabsf(nudgeY.velocity) > fabsf(maxVelY)) maxVelY = nudgeY.velocity;
 
-    if (abs(leftX) > abs(maxLeftX)) maxLeftX = leftX;
-    if (abs(leftY) > abs(maxLeftY)) maxLeftY = leftY;
+        if (abs(leftX) > abs(maxLeftX)) maxLeftX = leftX;
+        if (abs(leftY) > abs(maxLeftY)) maxLeftY = leftY;
 
-    if (abs(rightX) > abs(maxRightX)) maxRightX = rightX;
-    if (abs(rightY) > abs(maxRightY)) maxRightY = rightY;
+        if (abs(rightX) > abs(maxRightX)) maxRightX = rightX;
+        if (abs(rightY) > abs(maxRightY)) maxRightY = rightY;
 
-    if (now - lastPrint > 1000000) {
-        Serial.printf(
-            "maxAcc[%7.1f, %7.1f] / maxVel[%7.1f, %7.1f] "
-            "*** maxLeftStick[%6d, %6d] / maxRightStick[%6d, %6d]\n",
-            maxAccX, maxAccY, maxVelX, maxVelY,
-            maxLeftX, maxLeftY, maxRightX, maxRightY);
-        lastPrint = now;
+        if (now - lastPrint > 1000000) {
+            Serial.printf(
+                "maxAcc[%7.1f, %7.1f] / maxVel[%7.1f, %7.1f] "
+                "*** maxLeftStick[%6d, %6d] / maxRightStick[%6d, %6d]\n",
+                maxAccX, maxAccY, maxVelX, maxVelY,
+                maxLeftX, maxLeftY, maxRightX, maxRightY);
+            lastPrint = now;
 
-        if (now - lastReset > 5000000) {
-            Serial.println("\nResetting debug counters...");
-            maxAccX   = 0.0f;
-            maxAccY   = 0.0f;
-            maxVelX   = 0.0f;
-            maxVelY   = 0.0f;
-            maxLeftX  = 0;
-            maxLeftY  = 0;
-            maxRightX = 0;
-            maxRightY = 0;
-            lastReset = now;
+            if (now - lastReset > 5000000) {
+                Serial.println("\nResetting debug counters...");
+                maxAccX   = 0.0f;
+                maxAccY   = 0.0f;
+                maxVelX   = 0.0f;
+                maxVelY   = 0.0f;
+                maxLeftX  = 0;
+                maxLeftY  = 0;
+                maxRightX = 0;
+                maxRightY = 0;
+                lastReset = now;
+            }
         }
     }
-#endif
 }
 
 
@@ -576,8 +606,9 @@ void handleDigitalNudge() {
     const bool aboveThreshold = absPeakX > static_cast<float>(DIGITAL_NUDGE_THRESHOLD) || absPeakY > static_cast<float>(DIGITAL_NUDGE_THRESHOLD);
     const uint32_t nowMs      = millis();
 
-    // !HERE
-    Serial.printf("[DEBUG] peakX=%.1f, peakY=%.1f, threshold=%d, isNudging=%d\n", absPeakX, absPeakY, DIGITAL_NUDGE_THRESHOLD, nudgeState.isNudging);
+    if (DEBUG_MODE) {
+        Serial.printf("[DEBUG] peakX=%.1f, peakY=%.1f, threshold=%d, isNudging=%d\n", absPeakX, absPeakY, DIGITAL_NUDGE_THRESHOLD, nudgeState.isNudging);
+    }
 
     // Nudge trigger
     if (
@@ -678,4 +709,87 @@ ButtonAction getButtonAction(const ButtonInfo& button) {
             return {.type = ActionType::NONE};
         //@formatter:on
     }
+}
+
+/**
+ * Sends the current gamepad HID report at a fixed rate.
+ * Centralizes all gamepad state flushing to avoid redundant or conflicting sends.
+ */
+void sendGamepadReport() {
+    const uint32_t now               = micros();
+    static uint32_t lastReportMicros = 0;
+    if (now - lastReportMicros < GAMEPAD_REPORT_INTERVAL_US) return;
+    lastReportMicros = now;
+
+    hid.sendGamepadState();
+}
+
+
+/**
+ * Initializes the plunger potentiometer and calibrates the minimum resting position.
+ *
+ * Reads the ADC for PLUNGER_CALIB_DURATION_MS milliseconds and records the minimum
+ * value observed, which corresponds to the fully-forward (resting) position.
+ * The filter is initialized with the first reading.
+ */
+void setupPlunger() {
+    if constexpr (!PLUNGER_ENABLED) return;
+
+    Serial.println("[setupPlunger] Calibrating... Keep the plunger in resting position.");
+    const uint32_t start = millis();
+
+    while (millis() - start < 2000) {
+        if (const int raw = analogRead(PLUNGER_PIN); raw < plungerMinVal)
+            plungerMinVal = raw;
+        delay(5);
+    }
+
+    plungerFiltered = static_cast<float>(analogRead(PLUNGER_PIN));
+    Serial.printf("[setupPlunger] Calibration done. minVal=%d\n", plungerMinVal);
+}
+
+/**
+ * Reads the plunger potentiometer, applies exponential filtering, dead zone,
+ * and sends the value as the left trigger (Z Axis) over BLE HID.
+ *
+ */
+void handlePlunger() {
+    if constexpr (!PLUNGER_ENABLED) return;
+    if (mode != ControllerMode::VPX) return;
+
+    const int raw = analogRead(PLUNGER_PIN);
+
+    // Exponential low-pass filter
+    plungerFiltered = PLUNGER_FILTER_ALPHA * static_cast<float>(raw) + (1.0f - PLUNGER_FILTER_ALPHA) * plungerFiltered;
+
+    // Normalize to [0, 1]
+    float norm = (plungerFiltered - static_cast<float>(plungerMinVal)) / static_cast<float>(PLUNGER_MAX_VAL - plungerMinVal);
+    norm       = std::clamp(norm, 0.0f, 1.0f);
+
+    // Center to [-1, +1]
+    float centered = (norm * 2.0f) - 1.0f;
+
+    // Dead zone
+    if (fabsf(centered) < PLUNGER_DEAD_ZONE) {
+        centered = 0.0f;
+    }
+    else {
+        centered = centered > 0.0f
+                       ? (centered - PLUNGER_DEAD_ZONE) / (1.0f - PLUNGER_DEAD_ZONE)
+                       : (centered + PLUNGER_DEAD_ZONE) / (1.0f - PLUNGER_DEAD_ZONE);
+    }
+
+    // Map to LT range [0, 32767] — fully forward = 0, fully pulled = 32767
+    const auto zAxis = static_cast<uint16_t>(((centered + 1.0f) / 2.0f) * 32767.0f);
+
+    if (DEBUG_MODE) {
+        uint32_t now              = millis();
+        static uint32_t lastPrint = 0;
+        if (now - lastPrint > 1000) {
+            lastPrint = now;
+            Serial.printf("[handlePlunger] raw=%d, filtered=%f, centered=%.2f, zAxis=%d\n", raw, plungerFiltered, centered, zAxis);
+        }
+    }
+
+    hid.setLeftTrigger(zAxis, false);
 }

@@ -86,8 +86,8 @@ static const uint8_t hidReportMapData[] = {
     0x05, 0x01,               // Usage Page (Generic Desktop)
     0x09, 0x32,               // Usage Z (LT)
     0x09, 0x35,               // Usage Rz (RT)
-    0x15, 0x00,               // Logical Min -0
-    0x26, 0xFF, 0x03,         // Logical Max 1023
+    0x16, 0x00, 0x00,         // Logical Min 0
+    0x26, 0xFF, 0x7F,         // Logical Max 32767
     0x75, 0x10,               // Report Size 16 bits
     0x95, 0x02,               // Report Count 2
     0x81, 0x02,               // Input (Data, Variable, Absolute)
