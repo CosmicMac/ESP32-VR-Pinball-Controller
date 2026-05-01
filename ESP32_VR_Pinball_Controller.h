@@ -156,6 +156,7 @@ struct NudgeProcess
 void handleButton(ButtonInfo& button);
 void setMode(ControllerMode newMode, bool initialConfig = false);
 void setLedColor(LedColor color);
+void blink(LedColor color = LedColor::WHITE, uint8_t times = 3);
 void setupAccelerometer();
 bool readAccelRaw(int16_t& x, int16_t& y);
 bool sampleNudge();

@@ -76,16 +76,8 @@ void setup() {
 
     if (digitalRead(BTN_Y_PIN) == LOW) {
         DEBUG_MODE = true;
+        blink();
         Serial.println("[setup] Debug mode activated!");
-#ifdef RGB_BUILTIN
-        for (int i = 0; i < 3; ++i) {
-            setLedColor(LedColor::WHITE);
-            delay(200);
-            setLedColor(LedColor::OFF);
-            delay(200);
-        }
-        setLedColor(LedColor::RED);
-#endif
     }
 
     // Initialize change mode button
@@ -94,6 +86,11 @@ void setup() {
 
     // Initialize HID
     hid.begin(DEVICE_NAME, DEVICE_MANUFACTURER);
+    if (digitalRead(BTN_X_PIN) == LOW) {
+        BleHidController::deleteAllBonds();
+        blink();
+        Serial.println("[setup] All BLE bonds deleted!");
+    }
 
     // Initialize accelerometer
     setupAccelerometer();
@@ -266,6 +263,29 @@ void setLedColor(const LedColor color) {
         default: break;
         //@formatter:on
     }
+#endif
+}
+
+/**
+ * Blink the built-in RGB LED a specified number of times with the given color
+ *
+ * If RGB support is not available (RGB_BUILTIN not defined) the function is a no-op
+ * to allow safe calls from code that may run on hardware without an RGB LED
+ *
+ * @param color The LedColor value to show during the blink on-phase
+ * @param times Number of on/off cycles to perform
+ */
+void blink(const LedColor color, const uint8_t times) {
+#ifdef RGB_BUILTIN
+    for (uint8_t i = 0; i < times; ++i) {
+        setLedColor(color);
+        delay(200);
+        setLedColor(LedColor::OFF);
+        delay(200);
+    }
+#else
+    (void)color;
+    (void)times;
 #endif
 }
 
