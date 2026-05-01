@@ -124,7 +124,8 @@ void BleHidController::begin(const char* deviceName, const char* deviceManufactu
 
     NimBLEDevice::init(deviceName);
     NimBLEDevice::setPower(BLE_TX_POWER);
-    NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND);
+    // NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND);
+    NimBLEDevice::setSecurityAuth(true, false, false); // bonding, no MITM, no SC
     NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
 
     _server = NimBLEDevice::createServer();
@@ -153,6 +154,10 @@ void BleHidController::begin(const char* deviceName, const char* deviceManufactu
     adv->setAppearance(GENERIC_HID); // !HERE Meta Quest 3 doesn't seem to accept HID_GAMEPAD
     adv->enableScanResponse(true);
     adv->start();
+}
+
+void BleHidController::deleteAllBonds() {
+    NimBLEDevice::deleteAllBonds();
 }
 
 

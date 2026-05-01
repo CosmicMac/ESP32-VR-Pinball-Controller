@@ -19,6 +19,7 @@ set(BOARD_OPTIONS "UploadSpeed=921600")     # Board options for the ESP32 upload
 set(USER_LIBS_DIRS                          # User libraries to include
         "7Semi_LIS3DH"
         "MPU6050"
+        "NimBLE-Arduino"
 )
 set(PLATFORM_LIBS_DIRS                      # Built-in ESP32 platform libraries to include
         "Preferences"

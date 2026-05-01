@@ -180,6 +180,8 @@ public:
         uint16_t version               = 0x0100
     );
 
+    static void deleteAllBonds();
+
     static bool isConnected() { return _deviceConnected; }
 
     // Keyboard API
