@@ -9,7 +9,7 @@ static const uint8_t hidReportMapData[] = {
     0x05, 0x01,               // Usage Page (Generic Desktop)
     0x09, 0x06,               // Usage (Keyboard)
     0xA1, 0x01,               // Collection (Application)
-    0x85, REPORT_ID_KEYBOARD, // Report ID
+    0x85, static_cast<uint8_t>(REPORT_ID_KEYBOARD), // Report ID
 
     // Modifiers (Ctrl, Shift, Alt, Meta)
     0x05, 0x07,               // Usage Page (Keyboard)
@@ -38,7 +38,7 @@ static const uint8_t hidReportMapData[] = {
     0x05, 0x01,               // Usage Page (Generic Desktop)
     0x09, 0x05,               // Usage (Gamepad)
     0xA1, 0x01,               // Collection (Application)
-    0x85, REPORT_ID_GAMEPAD,  // Report ID
+    0x85, static_cast<uint8_t>(REPORT_ID_GAMEPAD),  // Report ID
 
     // 16 buttons
     0x05, 0x09,               // Usage Page (Button)
@@ -198,7 +198,7 @@ void BleHidController::keyModRelease(const uint8_t modifier) {
  * @param keycode
  */
 void BleHidController::keyPress(const uint8_t keycode) {
-    if (keycode == KEY_NONE || !_deviceConnected || _kbInputReport == nullptr) return;
+    if (keycode == static_cast<uint8_t>(KeyCode::NONE) || !_deviceConnected || _kbInputReport == nullptr) return;
 
     // Verify if key already exists
     for (const unsigned char key : _kbState.keys) {
@@ -270,7 +270,7 @@ void BleHidController::dpadPress(const uint8_t dpad) {
 }
 
 void BleHidController::dpadRelease() {
-    _gpState.dpad = DPAD_CENTERED;
+    _gpState.dpad = static_cast<uint8_t>(DpadDirection::CENTERED);
     sendGamepadState();
 }
 

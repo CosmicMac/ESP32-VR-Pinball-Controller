@@ -217,7 +217,7 @@ void setMode(const ControllerMode newMode, const bool initialConfig) {
     // Release all keys/buttons and reset dpad to centered before switching mode
     if (!initialConfig) {
         hid.keyReleaseAll();
-        hid.sendGamepad(BTN_NONE, DPAD_CENTERED, 0, 0, 0, 0);
+        hid.sendGamepad(static_cast<uint16_t>(GamepadButton::NONE), static_cast<uint8_t>(DpadDirection::CENTERED), 0, 0, 0, 0);
         Serial.println("[setMode] Releasing all keys and resetting dpad");
     }
     setLedColor(MODE_COLORS[static_cast<uint8_t>(newMode)]);

@@ -64,14 +64,14 @@ private:
      */
     struct __attribute__((packed)) GamepadReport
     {
-        uint16_t buttons = 0;             // 16 buttons bitfield
-        uint8_t dpad     = DPAD_CENTERED; // D-Pad 4 bits (up, right, down, left) + padding 4 bits
-        int16_t leftX    = 0;             // Left stick X (X axis, -32768–32767)
-        int16_t leftY    = 0;             // Left stick Y (Y axis, -32768–32767)
-        int16_t rightX   = 0;             // Right stick X (Rx axis, -32768–32767)
-        int16_t rightY   = 0;             // Right stick Y (Ry axis, -32768–32767)
-        uint16_t lt      = 0;             // Left trigger  (Z  axis, 0–32767)
-        uint16_t rt      = 0;             // Right trigger (Rz axis, 0–32767)
+        uint16_t buttons = 0;                                             // 16 buttons bitfield
+        uint8_t dpad     = static_cast<uint8_t>(DpadDirection::CENTERED); // D-Pad 4 bits (up, right, down, left) + padding 4 bits
+        int16_t leftX    = 0;                                             // Left stick X (X axis, -32768–32767)
+        int16_t leftY    = 0;                                             // Left stick Y (Y axis, -32768–32767)
+        int16_t rightX   = 0;                                             // Right stick X (Rx axis, -32768–32767)
+        int16_t rightY   = 0;                                             // Right stick Y (Ry axis, -32768–32767)
+        uint16_t lt      = 0;                                             // Left trigger  (Z  axis, 0–32767)
+        uint16_t rt      = 0;                                             // Right trigger (Rz axis, 0–32767)
     };
 
     static bool _deviceConnected;

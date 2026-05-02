@@ -56,61 +56,61 @@ static constexpr float ACCEL_FULL_SCALE = 32768.0f; // 16-bit
 // Classic gamepad buttons
 enum class ClassicBtn : uint16_t
 {
-    A               = BTN_A,
-    B               = BTN_B,
-    X               = BTN_X,
-    Y               = BTN_Y,
-    SELECT          = BTN_SELECT,
-    START           = BTN_START,
-    LAUNCH          = BTN_X,
-    LEFT_FLIPPER    = BTN_LB,
-    RIGHT_FLIPPER   = BTN_RB,
+    A               = static_cast<uint16_t>(GamepadButton::A),
+    B               = static_cast<uint16_t>(GamepadButton::B),
+    X               = static_cast<uint16_t>(GamepadButton::X),
+    Y               = static_cast<uint16_t>(GamepadButton::Y),
+    SELECT          = static_cast<uint16_t>(GamepadButton::SELECT),
+    START           = static_cast<uint16_t>(GamepadButton::START),
+    LAUNCH          = static_cast<uint16_t>(GamepadButton::X),
+    LEFT_FLIPPER    = static_cast<uint16_t>(GamepadButton::LB),
+    RIGHT_FLIPPER   = static_cast<uint16_t>(GamepadButton::RB),
     LEFT_MAGNASAVE  = TRIGGER_LEFT,
     RIGHT_MAGNASAVE = TRIGGER_RIGHT,
-    UP              = DPAD_UP,
-    DOWN            = DPAD_DOWN,
-    LEFT            = DPAD_LEFT,
-    RIGHT           = DPAD_RIGHT,
+    UP              = static_cast<uint16_t>(DpadDirection::UP),
+    DOWN            = static_cast<uint16_t>(DpadDirection::DOWN),
+    LEFT            = static_cast<uint16_t>(DpadDirection::LEFT),
+    RIGHT           = static_cast<uint16_t>(DpadDirection::RIGHT),
 };
 
 // FX keys
 enum class FxKey : uint8_t
 {
-    A               = KEY_I,
-    B               = KEY_I,
-    X               = KEY_I,
-    Y               = KEY_I,
-    SELECT          = KEY_I,
-    START           = KEY_I,
-    LAUNCH          = KEY_8,
-    LEFT_FLIPPER    = KEY_U,
-    RIGHT_FLIPPER   = KEY_6,
-    LEFT_MAGNASAVE  = KEY_8,
-    RIGHT_MAGNASAVE = KEY_8,
-    UP              = KEY_NONE,
-    DOWN            = KEY_NONE,
-    LEFT            = KEY_NONE,
-    RIGHT           = KEY_NONE,
+    A               = static_cast<uint8_t>(KeyCode::I),
+    B               = static_cast<uint8_t>(KeyCode::I),
+    X               = static_cast<uint8_t>(KeyCode::I),
+    Y               = static_cast<uint8_t>(KeyCode::I),
+    SELECT          = static_cast<uint8_t>(KeyCode::I),
+    START           = static_cast<uint8_t>(KeyCode::I),
+    LAUNCH          = static_cast<uint8_t>(KeyCode::NUM_8),
+    LEFT_FLIPPER    = static_cast<uint8_t>(KeyCode::U),
+    RIGHT_FLIPPER   = static_cast<uint8_t>(KeyCode::NUM_6),
+    LEFT_MAGNASAVE  = static_cast<uint8_t>(KeyCode::NUM_8),
+    RIGHT_MAGNASAVE = static_cast<uint8_t>(KeyCode::NUM_8),
+    UP              = static_cast<uint8_t>(KeyCode::NONE),
+    DOWN            = static_cast<uint8_t>(KeyCode::NONE),
+    LEFT            = static_cast<uint8_t>(KeyCode::NONE),
+    RIGHT           = static_cast<uint8_t>(KeyCode::NONE),
 };
 
 // VPX keys
 enum class VpxKey : uint8_t
 {
-    A               = KEY_ESC, // Pause game and display VR launcher
-    B               = KEY_KP8, // Numpad 8: recenter view in VR
-    X               = KEY_KP2, // Numpad 2: lower table in VR
-    Y               = KEY_KP5, // Numpad 5: upper table in VR
-    SELECT          = KEY_5,
-    START           = KEY_1,
-    LAUNCH          = KEY_ENTER,
-    LEFT_FLIPPER    = KEY_LEFT_SHIFT,
-    RIGHT_FLIPPER   = KEY_RIGHT_SHIFT,
-    LEFT_MAGNASAVE  = KEY_LEFT_CTRL,
-    RIGHT_MAGNASAVE = KEY_RIGHT_CTRL,
-    UP              = KEY_LEFT_SHIFT,  // Navigate in VR launcher menu
-    DOWN            = KEY_RIGHT_SHIFT, // ...
-    LEFT            = KEY_LEFT_CTRL,   // ...
-    RIGHT           = KEY_RIGHT_CTRL,  // ...
+    A               = static_cast<uint8_t>(KeyCode::ESC), // Pause game and display VR launcher
+    B               = static_cast<uint8_t>(KeyCode::KP8), // Numpad 8: recenter view in VR
+    X               = static_cast<uint8_t>(KeyCode::KP2), // Numpad 2: lower table in VR
+    Y               = static_cast<uint8_t>(KeyCode::KP5), // Numpad 5: upper table in VR
+    SELECT          = static_cast<uint8_t>(KeyCode::NUM_5),
+    START           = static_cast<uint8_t>(KeyCode::NUM_1),
+    LAUNCH          = static_cast<uint8_t>(KeyCode::ENTER),
+    LEFT_FLIPPER    = static_cast<uint8_t>(KeyCode::LEFT_SHIFT),
+    RIGHT_FLIPPER   = static_cast<uint8_t>(KeyCode::RIGHT_SHIFT),
+    LEFT_MAGNASAVE  = static_cast<uint8_t>(KeyCode::LEFT_CTRL),
+    RIGHT_MAGNASAVE = static_cast<uint8_t>(KeyCode::RIGHT_CTRL),
+    UP              = static_cast<uint8_t>(KeyCode::LEFT_SHIFT),  // Navigate in VR launcher menu
+    DOWN            = static_cast<uint8_t>(KeyCode::RIGHT_SHIFT), // ...
+    LEFT            = static_cast<uint8_t>(KeyCode::LEFT_CTRL),   // ...
+    RIGHT           = static_cast<uint8_t>(KeyCode::RIGHT_CTRL),  // ...
 };
 
 
@@ -121,9 +121,9 @@ enum class VpxKey : uint8_t
 // FX keys
 enum class FxNudgeKey : uint8_t
 {
-    FORWARD = KEY_A,
-    RIGHT   = KEY_D,
-    LEFT    = KEY_F,
+    FORWARD = static_cast<uint8_t>(KeyCode::A),
+    RIGHT   = static_cast<uint8_t>(KeyCode::D),
+    LEFT    = static_cast<uint8_t>(KeyCode::F),
 };
 
 
