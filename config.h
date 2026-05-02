@@ -1,5 +1,5 @@
 #pragma once
-#include "BleHidController.h"
+#include "HidConstants.h"
 
 // #########################################################
 // GPIO pins for buttons
