@@ -82,6 +82,7 @@ set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CXX)
 add_executable(${PROJECT_NAME} ${SOURCES}
         ESP32_VR_Pinball_Controller.h
         config.h
+        AccelerometerManager.cpp
 )
 
 

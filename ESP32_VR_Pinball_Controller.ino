@@ -1,16 +1,10 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include "BleHidController.h"
+#include "AccelerometerManager.h"
+#include "PlungerHandler.h"
 #include "ESP32_VR_Pinball_Controller.h"
 #include "config.h"
-
-#if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_MPU6050
-#include <MPU6050.h>
-MPU6050 mpu(ACCEL_SENSOR_ADDR);
-#elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
-#include <7Semi_LIS3DH.h>
-LIS3DH_7Semi Adx;
-#endif
 
 bool DEBUG_MODE = false; // Press button Y on start to activate debug mode
 
@@ -50,14 +44,8 @@ NudgeProcess nudgeX, nudgeY; // Shared between analog and digital nudge handlers
 bool configChanged        = false; // Flag to indicate if the configuration has changed and needs to be saved
 uint32_t lastConfigChange = 0;     // Timestamp of the last configuration change, used to throttle flash writes
 
-int16_t offsetX = 0;
-int16_t offsetY = 0;
-int16_t offsetZ = 0;
-
-// Plunger state
-float plungerFiltered         = 0.0f;
-int plungerMinVal             = 4095; // Will be calculated during initialization
-constexpr int PLUNGER_MAX_VAL = 4095;
+AccelerometerManager accelManager;
+PlungerHandler plungerHandler;
 
 // ISR handlers
 volatile bool changeModeIRQ = false;
@@ -96,7 +84,7 @@ void setup() {
     setupAccelerometer();
 
     // Initialize plunger
-    setupPlunger();
+    plungerHandler.setup();
 
     // Load saved mode
     config.begin("ctrl_cfg", false);
@@ -151,7 +139,7 @@ void loop() {
         handleAnalogNudge();
     }
 
-    handlePlunger();
+    plungerHandler.handle(mode, hid, DEBUG_MODE);
 
     sendGamepadReport();
 
@@ -290,189 +278,24 @@ void blink(const LedColor color, const uint8_t times) {
 }
 
 /**
- * Setup and initialize the accelerometer based on the configured sensor type
- *
- * This function handles the initialization of the I2C interface, sets up
- * the accelerometer hardware (either MPU6050 or LIS3DH, depending on the
- * configured sensor type), and performs calibration if necessary.
- *
- * MPU6050-specific setup:
- * - Configures the Digital Low Pass Filter (DLPF) and sampling rate for the MPU6050 sensor.
- * - Verifies the sensor connection and runs an automatic calibration routine.
- *
- * LIS3DH-specific setup:
- * - Initializes the LIS3DH accelerometer with specific parameters, such as range, data rate,
- *   and resolution.
- * - Performs a multi-step calibration that computes accelerometer offsets based on sample averages
- *   before and after calibration.
- *
- * Calibration:
- * - For the LIS3DH sensor, a pre-calibration sample average is computed, offsets are calculated from
- *   a defined number of calibration samples, and a post-calibration average is used for verification.
+ * Setup and initialize the accelerometer using the AccelerometerManager
  *
  * @note Ensure that the sensor remains stationary during calibration for accurate offset computation.
- * @note The function uses delays during calibration to gather consistent sensor readings.
  */
 void setupAccelerometer() {
-    // Start I2C interface
-    if (!Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN)) {
-        Serial.println("I2C init failed!");
-        return;
-    }
-
-    Wire.setClock(400000); // Fast I²C
-
-#if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_MPU6050
-    // Initialize MPU6050
-    mpu.initialize();
-    mpu.setDLPFMode(MPU6050_DLPF_BW_188); // DLPF bandwidth: 188Hz (allows up to 500Hz sample rate)
-    mpu.setRate(1);                       // Sample rate divider: 1kHz internal sample rate / (Sample rate divider + 1) = 500Hz
-
-    if (!mpu.testConnection()) {
-        Serial.println("MPU6050 connection failed!");
-        while (true) delay(1000);
-    }
-
-    Serial.println("Calibrating... Keep the MPU6050 sensor still.");
-    mpu.CalibrateAccel();
-#elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
-    // Initialize LIS3DH
-    if (!Adx.begin(Wire)) {
-        Serial.println("LIS3DH init failed!");
-        while (true) delay(1000);
-    }
-
-    Adx.setScale(RANGE_2G);
-    Adx.setDataRate(ODR_400HZ);
-    Adx.enableTemperature(false);
-    Adx.setHighResolution(true);
-
-    /**
-     * Calibration
-     */
-
-    constexpr uint8_t CALIB_SAMPLES   = 64; // Number of samples used for calibration
-    constexpr uint16_t CALIB_DELAY    = 10; // Delay (ms) between calibration samples
-    constexpr uint8_t PREVIEW_SAMPLES = 10;
-
-    int32_t preX = 0, preY = 0, preZ = 0;
-
-    uint8_t preCount = 0;
-
-    int16_t xRaw, yRaw, zRaw;
-
-    // Average of samples before calibration
-    for (uint8_t i = 0; i < PREVIEW_SAMPLES; i++) {
-        if (Adx.readAccel(xRaw, yRaw, zRaw)) {
-            preX += xRaw;
-            preY += yRaw;
-            preZ += zRaw;
-            preCount++;
-        }
-        delay(CALIB_DELAY);
-    }
-    if (preCount > 0) {
-        Serial.printf("Before calibration (avg %d samples) -> X: %d  Y: %d  Z: %d\n", preCount, preX / preCount, preY / preCount, preZ / preCount);
-    }
-
-    // Calibration: compute offsets over CALIB_SAMPLES readings
-    int32_t sumX  = 0, sumY = 0, sumZ = 0;
-    uint8_t count = 0;
-
-    // First pass: compute mean (offsets)
-    int16_t samples[CALIB_SAMPLES][3];
-    for (uint8_t i = 0; i < CALIB_SAMPLES; i++) {
-        if (Adx.readAccel(xRaw, yRaw, zRaw)) {
-            samples[count][0] = xRaw;
-            samples[count][1] = yRaw;
-            samples[count][2] = zRaw;
-            sumX              += xRaw;
-            sumY              += yRaw;
-            sumZ              += zRaw;
-            count++;
-        }
-        delay(CALIB_DELAY);
-    }
-
-    if (count > 0) {
-        offsetX = static_cast<int16_t>(sumX / count);
-        offsetY = static_cast<int16_t>(sumY / count);
-        offsetZ = static_cast<int16_t>(sumZ / count);
-    }
-
-    Serial.printf("Calibration done. Offsets -> X: %d  Y: %d  Z: %d\n", offsetX, offsetY, offsetZ);
-
-    // Average of samples after calibration
-    int32_t postX     = 0, postY = 0, postZ = 0;
-    uint8_t postCount = 0;
-
-    for (uint8_t i = 0; i < PREVIEW_SAMPLES; i++) {
-        if (Adx.readAccel(xRaw, yRaw, zRaw)) {
-            postX += xRaw - offsetX;
-            postY += yRaw - offsetY;
-            postZ += zRaw - offsetZ;
-            postCount++;
-        }
-        delay(CALIB_DELAY);
-    }
-    if (postCount > 0) {
-        Serial.printf("After calibration (avg %d samples) -> X: %d  Y: %d  Z: %d\n", postCount, postX / postCount, postY / postCount, postZ / postCount);
-    }
-
-#endif
+    accelManager.begin();
 }
 
 
 /**
- * Reads raw acceleration values from the sensor and applies calibration, rotation, and flip adjustments.
- *
- * This function retrieves raw X, Y, and Z axis acceleration values from the selected sensor
- * and adjusts them based on predefined offsets, rotation, and axis flipping configurations.
+ * Reads raw acceleration values from the sensor using AccelerometerManager
  *
  * @param xr Reference to store the calibrated and adjusted X-axis acceleration
  * @param yr Reference to store the calibrated and adjusted Y-axis acceleration
  * @return True if the acceleration values are successfully read and adjusted; false otherwise
  */
 bool readAccelRaw(int16_t& xr, int16_t& yr) {
-    int16_t x, y, z;
-
-#if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_MPU6050
-    mpu.getAcceleration(&x, &y, &z);
-#elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
-    if (!Adx.readAccel(x, y, z)) {
-        return false;
-    }
-#endif
-
-    // Apply offsets
-    x -= offsetX;
-    y -= offsetY;
-    //z -= offsetZ;
-
-    // Rotation around Z axis (CCW, viewed from +Z)
-    // zr = z;
-    switch (ACCEL_SENSOR_ROTATION) {
-        //@formatter:off
-        case 0:     xr = x;     yr = y;     break;
-        case 90:    xr = -y;    yr = x;     break; // 90° CCW: X -> -Y, Y -> X
-        case 180:   xr = -x;    yr = -y;    break; // 180°: X -> -X, Y -> -Y
-        case 270:   xr = y;     yr = -x;    break; // 270° CCW (90° CW): X -> Y, Y -> -X
-        default:    xr = x;     yr = y;     break; // Unsupported angle → no rotation
-        //@formatter:on
-    }
-
-    // Apply flips (after rotation)
-    if (ACCEL_SENSOR_UPSIDEDOWN_X) {
-        // Flip around X: Y and Z invert
-        yr = -yr;
-        // zr = -zr;
-    }
-    if (ACCEL_SENSOR_UPSIDEDOWN_Y) {
-        // Flip around Y: X and Z invert
-        xr = -xr;
-        // zr = -zr;
-    }
-    return true;
+    return accelManager.readRaw(xr, yr);
 }
 
 
@@ -745,71 +568,3 @@ void sendGamepadReport() {
 }
 
 
-/**
- * Initializes the plunger potentiometer and calibrates the minimum resting position.
- *
- * Reads the ADC for PLUNGER_CALIB_DURATION_MS milliseconds and records the minimum
- * value observed, which corresponds to the fully-forward (resting) position.
- * The filter is initialized with the first reading.
- */
-void setupPlunger() {
-    if constexpr (!PLUNGER_ENABLED) return;
-
-    Serial.println("[setupPlunger] Calibrating... Keep the plunger in resting position.");
-    const uint32_t start = millis();
-
-    while (millis() - start < 2000) {
-        if (const int raw = analogRead(PLUNGER_PIN); raw < plungerMinVal)
-            plungerMinVal = raw;
-        delay(5);
-    }
-
-    plungerFiltered = static_cast<float>(analogRead(PLUNGER_PIN));
-    Serial.printf("[setupPlunger] Calibration done. minVal=%d\n", plungerMinVal);
-}
-
-/**
- * Reads the plunger potentiometer, applies exponential filtering, dead zone,
- * and sends the value as the left trigger (Z Axis) over BLE HID.
- *
- */
-void handlePlunger() {
-    if constexpr (!PLUNGER_ENABLED) return;
-    if (mode != ControllerMode::VPX) return;
-
-    const int raw = analogRead(PLUNGER_PIN);
-
-    // Exponential low-pass filter
-    plungerFiltered = PLUNGER_FILTER_ALPHA * static_cast<float>(raw) + (1.0f - PLUNGER_FILTER_ALPHA) * plungerFiltered;
-
-    // Normalize to [0, 1]
-    float norm = (plungerFiltered - static_cast<float>(plungerMinVal)) / static_cast<float>(PLUNGER_MAX_VAL - plungerMinVal);
-    norm       = std::clamp(norm, 0.0f, 1.0f);
-
-    // Center to [-1, +1]
-    float centered = (norm * 2.0f) - 1.0f;
-
-    // Dead zone
-    if (fabsf(centered) < PLUNGER_DEAD_ZONE) {
-        centered = 0.0f;
-    }
-    else {
-        centered = centered > 0.0f
-                       ? (centered - PLUNGER_DEAD_ZONE) / (1.0f - PLUNGER_DEAD_ZONE)
-                       : (centered + PLUNGER_DEAD_ZONE) / (1.0f - PLUNGER_DEAD_ZONE);
-    }
-
-    // Map to LT range [0, 32767] — fully forward = 0, fully pulled = 32767
-    const auto zAxis = static_cast<uint16_t>(((centered + 1.0f) / 2.0f) * 32767.0f);
-
-    if (DEBUG_MODE) {
-        uint32_t now              = millis();
-        static uint32_t lastPrint = 0;
-        if (now - lastPrint > 1000) {
-            lastPrint = now;
-            Serial.printf("[handlePlunger] raw=%d, filtered=%f, centered=%.2f, zAxis=%d\n", raw, plungerFiltered, centered, zAxis);
-        }
-    }
-
-    hid.setLeftTrigger(zAxis, false);
-}
