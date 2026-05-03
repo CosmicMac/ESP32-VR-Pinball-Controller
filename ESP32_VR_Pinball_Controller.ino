@@ -139,7 +139,7 @@ void loop() {
         handleAnalogNudge();
     }
 
-    plungerHandler.handle(mode, hid, DEBUG_MODE);
+    plungerHandler.handle(mode, DEBUG_MODE);
 
     sendGamepadReport();
 

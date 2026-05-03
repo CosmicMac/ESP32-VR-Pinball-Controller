@@ -1,6 +1,8 @@
 #include "PlungerHandler.h"
 #include <Arduino.h>
 
+extern BleHidController hid;
+
 PlungerHandler::PlungerHandler() 
     : m_filteredValue(0.0f)
     , m_minValue(PLUNGER_MAX_VAL) {
@@ -22,7 +24,7 @@ void PlungerHandler::setup() {
     Serial.printf("[PlungerHandler] Calibration done. minVal=%d\n", m_minValue);
 }
 
-void PlungerHandler::handle(ControllerMode mode, BleHidController& hid, bool debugMode) {
+void PlungerHandler::handle(ControllerMode mode, bool debugMode) {
     if constexpr (!PLUNGER_ENABLED) return;
     if (mode != ControllerMode::VPX) return;
 

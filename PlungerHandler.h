@@ -9,11 +9,9 @@ public:
     ~PlungerHandler() = default;
 
     void setup();
-    void handle(ControllerMode mode, BleHidController& hid, bool debugMode);
+    void handle(ControllerMode mode, bool debugMode);
 
 private:
     float m_filteredValue;
     int m_minValue;
-
-    static constexpr int PLUNGER_MAX_VAL = 4095;
 };

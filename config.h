@@ -169,6 +169,7 @@ constexpr uint32_t DIGITAL_NUDGE_RESET_MS          = 50;  // Time to reset nudge
 // #########################################################
 constexpr bool PLUNGER_ENABLED       = true;
 constexpr uint8_t PLUNGER_PIN        = 14;    // ADC pin (GPIO14 = ADC2_CH3)
+constexpr int PLUNGER_MAX_VAL        = 4095;  // Maximum ADC value
 constexpr float PLUNGER_FILTER_ALPHA = 0.05f; // Lower = more stable
 constexpr float PLUNGER_DEAD_ZONE    = 0.03f; // ±3% dead zone around center
 
