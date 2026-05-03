@@ -3,6 +3,7 @@
 #include "BleHidController.h"
 #include "AccelerometerManager.h"
 #include "PlungerHandler.h"
+#include "NudgeHandler.h"
 #include "ESP32_VR_Pinball_Controller.h"
 #include "config.h"
 
@@ -37,15 +38,14 @@ static_assert(NUM_BUTTONS == std::size(buttons), "NUM_BUTTONS mismatch");
 
 BleHidController hid;
 Preferences config;
-NudgeState nudgeState;
 ControllerMode mode;
-NudgeProcess nudgeX, nudgeY; // Shared between analog and digital nudge handlers
 
 bool configChanged        = false; // Flag to indicate if the configuration has changed and needs to be saved
 uint32_t lastConfigChange = 0;     // Timestamp of the last configuration change, used to throttle flash writes
 
 AccelerometerManager accelManager;
 PlungerHandler plungerHandler;
+NudgeHandler nudgeHandler;
 
 // ISR handlers
 volatile bool changeModeIRQ = false;
@@ -85,6 +85,9 @@ void setup() {
 
     // Initialize plunger
     plungerHandler.setup();
+
+    // Initialize nudge
+    nudgeHandler.setup();
 
     // Load saved mode
     config.begin("ctrl_cfg", false);
@@ -133,10 +136,10 @@ void loop() {
 
     // Handle nudge detection from accelerometer
     if (mode == ControllerMode::FX) {
-        handleDigitalNudge();
+        nudgeHandler.handleDigital(DEBUG_MODE);
     }
     else {
-        handleAnalogNudge();
+        nudgeHandler.handleAnalog(DEBUG_MODE);
     }
 
     plungerHandler.handle(mode, DEBUG_MODE);
@@ -284,210 +287,6 @@ void blink(const LedColor color, const uint8_t times) {
  */
 void setupAccelerometer() {
     accelManager.begin();
-}
-
-
-/**
- * Reads raw acceleration values from the sensor using AccelerometerManager
- *
- * @param xr Reference to store the calibrated and adjusted X-axis acceleration
- * @param yr Reference to store the calibrated and adjusted Y-axis acceleration
- * @return True if the acceleration values are successfully read and adjusted; false otherwise
- */
-bool readAccelRaw(int16_t& xr, int16_t& yr) {
-    return accelManager.readRaw(xr, yr);
-}
-
-
-/**
- * Processes input from the accelerometer at a defined sampling interval
- * and updates the nudge subsystem with the latest raw acceleration values.
- *
- * @return true if a new sample was read and processed, false if the sampling interval has not yet elapsed
- */
-bool sampleNudge() {
-    const uint32_t now = micros();
-
-    static uint32_t lastSampleMicros = 0;
-    if (now - lastSampleMicros < NUDGE_SAMPLE_INTERVAL_US) return false;
-    lastSampleMicros = now;
-
-    int16_t rx, ry;
-
-    if (readAccelRaw(rx, ry)) {
-        nudgeX.process(rx, now);
-        nudgeY.process(ry, now);
-    }
-
-    return true;
-}
-
-/**
- * Handles processing of analog nudge inputs and updates gamepad stick positions.
- *
- * This method samples acceleration and velocity data for both X and Y axes from
- * the nudge sensors, processes them into scaled stick values, and sends the updated
- * state to the BLE HID controller. It incorporates timing constraints to regulate
- * the frequency of stick updates.
- *
- * If debugging is enabled, this method logs the maximum acceleration, velocity,
- * and stick values observed over specified intervals, with the ability to periodically
- * reset these counters.
- */
-void handleAnalogNudge() {
-    const uint32_t now = micros();
-
-    sampleNudge();
-
-    static uint32_t lastReportMicros = 0;
-
-    if (now - lastReportMicros < ANALOG_NUDGE_REPORT_INTERVAL_US) return;
-    lastReportMicros = now;
-
-    const float accX = nudgeX.acceleration;
-    const float accY = nudgeY.acceleration;
-    const float velX = nudgeX.velocity;
-    const float velY = nudgeY.velocity;
-
-    // Left stick: acceleration (Classic)
-    const int16_t leftX = static_cast<int16_t>(std::clamp(accX * ANALOG_NUDGE_ACCELERATION_SCALE, -32767.0f, 32767.0f));
-    const int16_t leftY = static_cast<int16_t>(std::clamp(accY * ANALOG_NUDGE_ACCELERATION_SCALE, -32767.0f, 32767.0f));
-
-    // Right stick: velocity (VPX)
-    const int16_t rightX = static_cast<int16_t>(std::clamp(velX * ANALOG_NUDGE_VELOCITY_SCALE, -32767.0f, 32767.0f));
-    const int16_t rightY = static_cast<int16_t>(std::clamp(velY * ANALOG_NUDGE_VELOCITY_SCALE, -32767.0f, 32767.0f));
-
-    // Send both axes together
-    hid.setLeftStick(leftX, leftY, false);
-    hid.setRightStick(rightX, rightY, false);
-    // hid.sendGamepadState();
-
-    if (DEBUG_MODE) {
-        static uint32_t lastPrint = 0, lastReset = 0;
-
-        static float maxAccX     = 0.0f, maxAccY = 0.0f,
-                     maxVelX     = 0.0f, maxVelY = 0.0f;
-        static int16_t maxLeftX  = 0, maxLeftY   = 0,
-                       maxRightX = 0, maxRightY  = 0;
-
-        if (fabsf(nudgeX.acceleration) > fabsf(maxAccX)) maxAccX = nudgeX.acceleration;
-        if (fabsf(nudgeY.acceleration) > fabsf(maxAccY)) maxAccY = nudgeY.acceleration;
-
-        if (fabsf(nudgeX.velocity) > fabsf(maxVelX)) maxVelX = nudgeX.velocity;
-        if (fabsf(nudgeY.velocity) > fabsf(maxVelY)) maxVelY = nudgeY.velocity;
-
-        if (abs(leftX) > abs(maxLeftX)) maxLeftX = leftX;
-        if (abs(leftY) > abs(maxLeftY)) maxLeftY = leftY;
-
-        if (abs(rightX) > abs(maxRightX)) maxRightX = rightX;
-        if (abs(rightY) > abs(maxRightY)) maxRightY = rightY;
-
-        if (now - lastPrint > 1000000) {
-            Serial.printf(
-                "maxAcc[%7.1f, %7.1f] / maxVel[%7.1f, %7.1f] "
-                "*** maxLeftStick[%6d, %6d] / maxRightStick[%6d, %6d]\n",
-                maxAccX, maxAccY, maxVelX, maxVelY,
-                maxLeftX, maxLeftY, maxRightX, maxRightY);
-            lastPrint = now;
-
-            if (now - lastReset > 5000000) {
-                Serial.println("\nResetting debug counters...");
-                maxAccX   = 0.0f;
-                maxAccY   = 0.0f;
-                maxVelX   = 0.0f;
-                maxVelY   = 0.0f;
-                maxLeftX  = 0;
-                maxLeftY  = 0;
-                maxRightX = 0;
-                maxRightY = 0;
-                lastReset = now;
-            }
-        }
-    }
-}
-
-
-/**
- * Processes digital nudge inputs for directional detection and state management.
- *
- * This method evaluates acceleration data sampled over a defined window to
- * detect peak values in both X and Y axes and determines if a nudge input exceeds
- * the configured threshold. Based on the dominant axis, it triggers a corresponding
- * directional key press and manages nudge release state with hysteresis.
- *
- * Key features include:
- * - Directional detection using peak acceleration values.
- * - Cooldown and reset intervals for stable nudge state transitions.
- * - Integration with HID controller for key press/release events.
- *
- * State and calculation flow:
- * 1. Accumulate peak values during sampling intervals.
- * 2. Evaluate state after a defined evaluation interval.
- * 3. Trigger nudge key events when conditions are met.
- * 4. Handle release hysteresis to reset the nudge state when thresholds are below the release limit.
- */
-void handleDigitalNudge() {
-    const uint32_t now = micros();
-
-    static float peakX = 0.0f, peakY = 0.0f;
-
-    // Accumulate peak acceleration for direction detection over the evaluation window
-    if (sampleNudge()) {
-        if (fabsf(nudgeX.acceleration) > fabsf(peakX)) peakX = nudgeX.acceleration;
-        if (fabsf(nudgeY.acceleration) > fabsf(peakY)) peakY = nudgeY.acceleration;
-    }
-
-    /**
-     * State evaluation
-     */
-    static uint32_t lastEvalMicros = 0;
-    if (now - lastEvalMicros < DIGITAL_NUDGE_EVAL_INTERVAL_US) return;
-    lastEvalMicros = now;
-
-    const float absPeakX      = fabsf(peakX);
-    const float absPeakY      = fabsf(peakY);
-    const bool aboveThreshold = absPeakX > static_cast<float>(DIGITAL_NUDGE_THRESHOLD) || absPeakY > static_cast<float>(DIGITAL_NUDGE_THRESHOLD);
-    const uint32_t nowMs      = millis();
-
-    if (DEBUG_MODE) {
-        Serial.printf("[DEBUG] peakX=%.1f, peakY=%.1f, threshold=%d, isNudging=%d\n", absPeakX, absPeakY, DIGITAL_NUDGE_THRESHOLD, nudgeState.isNudging);
-    }
-
-    // Nudge trigger
-    if (
-        aboveThreshold && !nudgeState.isNudging &&
-        nowMs - nudgeState.lastNudgeMillis > DIGITAL_NUDGE_COOLDOWN_MS
-    ) {
-        nudgeState.lastNudgeMillis = nowMs;
-        nudgeState.isNudging       = true;
-        nudgeState.nudgeKey        = 0;
-
-        // Determine nudge direction from the dominant peak axis
-        if (absPeakY >= absPeakX) {
-            if (peakY > 0) nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD);
-        }
-        else {
-            nudgeState.nudgeKey = static_cast<uint8_t>(peakX < 0 ? FxNudgeKey::LEFT : FxNudgeKey::RIGHT);
-        }
-        if (nudgeState.nudgeKey != 0) hid.keyPress(nudgeState.nudgeKey);
-    }
-    // Nudge release (hysteresis)
-    else if (
-        nudgeState.isNudging &&
-        absPeakX < static_cast<float>(DIGITAL_NUDGE_RELEASE_THRESHOLD) &&
-        absPeakY < static_cast<float>(DIGITAL_NUDGE_RELEASE_THRESHOLD) &&
-        nowMs - nudgeState.lastNudgeMillis > DIGITAL_NUDGE_RESET_MS
-    ) {
-        nudgeState.isNudging = false;
-        if (nudgeState.nudgeKey != 0) {
-            hid.keyRelease(nudgeState.nudgeKey);
-            nudgeState.nudgeKey = 0;
-        }
-    }
-
-    // Reset peak accumulators for the next evaluation window
-    peakX = 0.0f;
-    peakY = 0.0f;
 }
 
 /**
