@@ -1,4 +1,5 @@
 #pragma once
+#include <Arduino.h>
 
 // Report IDs
 constexpr uint8_t REPORT_ID_KEYBOARD = 1;
