@@ -43,4 +43,5 @@ desktop.ini
 # Miscellaneous
 assets/src
 tmp
+.windsurf
 TODO.md

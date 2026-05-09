@@ -4,7 +4,7 @@
 #include <Wire.h>
 #include <Arduino.h>
 
-AccelerometerManager::AccelerometerManager() : sensor(nullptr) {}
+AccelerometerManager::AccelerometerManager() : m_sensor(nullptr) {}
 
 void AccelerometerManager::begin() {
     // Initialize I2C
@@ -16,24 +16,24 @@ void AccelerometerManager::begin() {
 
     // Instantiate concrete sensor based on configuration
 #if ACCEL_SENSOR_TYPE == ACCEL_SENSOR_MPU6050
-    sensor = std::make_unique<MPU6050_Sensor>(ACCEL_SENSOR_ADDR);
+    m_sensor = std::make_unique<MPU6050_Sensor>(ACCEL_SENSOR_ADDR);
 #elif ACCEL_SENSOR_TYPE == ACCEL_SENSOR_LIS3DH
-    sensor = std::make_unique<LIS3DH_Sensor>();
+    m_sensor = std::make_unique<LIS3DH_Sensor>();
 #endif
 
-    if (sensor) {
-        if (!sensor->initialize()) {
+    if (m_sensor) {
+        if (!m_sensor->initialize()) {
             Serial.println("Accelerometer initialization failed!");
             return;
         }
-        sensor->calibrate();
+        m_sensor->calibrate();
     }
 }
 
 bool AccelerometerManager::readRaw(int16_t& x, int16_t& y, int16_t& z) {
-    if (!sensor) return false;
+    if (!m_sensor) return false;
     
-    if (!sensor->read(x, y, z)) {
+    if (!m_sensor->read(x, y, z)) {
         return false;
     }
     

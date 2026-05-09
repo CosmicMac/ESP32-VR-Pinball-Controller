@@ -73,18 +73,18 @@ set(ARDUINO_LIBRARIES_DIR "${ARDUINO_USER_DIR}/libraries")
 ##############################################################################
 # Configure the target for the IDE
 ##############################################################################
-file(GLOB_RECURSE SOURCES "*.ino" "*.cpp" "*.c")
+file(GLOB_RECURSE SOURCES
+        "${CMAKE_SOURCE_DIR}/*.ino"
+        "${CMAKE_SOURCE_DIR}/*.cpp"
+        "${CMAKE_SOURCE_DIR}/*.c"
+        "${CMAKE_SOURCE_DIR}/*.h"
+)
+# Exclude git files
+list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_SOURCE_DIR}/\\.git/.*")
+add_executable(${PROJECT_NAME} ${SOURCES})
 
 # Force the language (CLion does not know that .ino is C++)
 set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CXX)
-
-# Create a "dummy" executable so that CLion indexes the files
-add_executable(${PROJECT_NAME} ${SOURCES}
-        ESP32_VR_Pinball_Controller.h
-        config.h
-        AccelerometerManager.cpp
-)
-
 
 ##############################################################################
 # Injection of Includes

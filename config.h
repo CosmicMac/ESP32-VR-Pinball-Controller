@@ -2,9 +2,7 @@
 #include "HidConstants.h"
 
 // #########################################################
-// GPIO pins for buttons
-// Make sure to connect one leg of each button to GND
-// and the other leg to the GPIO pin defined here
+// GPIO pins
 // #########################################################
 
 // Buttons: connect one leg of each button to GND and the other leg to the GPIO pin
@@ -130,11 +128,10 @@ enum class FxNudgeKey : uint8_t
 // #########################################################
 // BLE
 // #########################################################
-constexpr auto DEVICE_NAME                 = "VR Pinball controller"; // BLE device name
-constexpr auto DEVICE_MANUFACTURER         = "CosmicMac";             // BLE device manufacturer
-constexpr uint8_t BTN_DEBOUNCE_MS          = 10;                      // Debounce delay for buttons in ms
-constexpr uint16_t CONFIG_SAVE_INTERVAL_MS = 5000;                    // Interval to save configuration to flash in ms
-constexpr uint16_t GAMEPAD_REPORT_RATE_HZ  = 120;                     // HID report rate for gamepad state in Hz
+constexpr auto DEVICE_NAME                = "VR Pinball controller"; // BLE device name
+constexpr auto DEVICE_MANUFACTURER        = "CosmicMac";             // BLE device manufacturer
+constexpr uint8_t BTN_DEBOUNCE_MS         = 10;                      // Debounce delay for buttons in ms
+constexpr uint16_t GAMEPAD_REPORT_RATE_HZ = 120;                     // HID report rate for gamepad state in Hz
 
 
 // #########################################################
@@ -167,11 +164,27 @@ constexpr uint32_t DIGITAL_NUDGE_RESET_MS          = 50;  // Time to reset nudge
 // #########################################################
 // Plunger parameters
 // #########################################################
-constexpr bool PLUNGER_ENABLED       = true;
-constexpr uint8_t PLUNGER_PIN        = 14;    // ADC pin (GPIO14 = ADC2_CH3)
-constexpr int PLUNGER_MAX_VAL        = 4095;  // Maximum ADC value
-constexpr float PLUNGER_FILTER_ALPHA = 0.05f; // Lower = more stable
-constexpr float PLUNGER_DEAD_ZONE    = 0.03f; // ±3% dead zone around center
+constexpr bool PLUNGER_ENABLED              = true;
+constexpr uint8_t PLUNGER_PIN               = 14;    // ADC pin (GPIO14 = ADC2_CH3)
+constexpr int PLUNGER_MAX_VAL               = 4095;  // Maximum ADC value
+constexpr float PLUNGER_FILTER_ALPHA        = 0.05f; // Lower = more stable
+constexpr float PLUNGER_DEAD_ZONE           = 0.03f; // ±3% dead zone around center
+constexpr uint32_t PLUNGER_CALIBRATION_MS   = 2000;  // Calibration duration in ms
+constexpr uint32_t PLUNGER_CALIBRATION_DELAY_MS = 5; // Delay between calibration samples in ms
+constexpr uint32_t PLUNGER_DEBUG_PRINT_INTERVAL_MS = 1000; // Debug print interval in ms
+
+
+// #########################################################
+// NVS parameters
+// #########################################################
+constexpr auto NVS_NAMESPACE            = "pinball_ctrl"; // Namespace for NVS storage
+constexpr uint16_t NVS_SAVE_INTERVAL_MS = 5000;           // Interval to save configuration to flash in ms
+
+
+// #########################################################
+// Misc parameters
+// #########################################################
+constexpr uint8_t LED_BRIGHTNESS = 128; // 0-255
 
 
 // #########################################################

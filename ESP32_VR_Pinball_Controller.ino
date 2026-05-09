@@ -1,51 +1,28 @@
 #include <Arduino.h>
 #include <Preferences.h>
+#include "LedManager.h"
 #include "BleHidController.h"
 #include "AccelerometerManager.h"
 #include "PlungerHandler.h"
 #include "NudgeHandler.h"
+#include "ButtonManager.h"
 #include "ESP32_VR_Pinball_Controller.h"
 #include "config.h"
 
-bool DEBUG_MODE = false; // Press button Y on start to activate debug mode
+bool debugMode = false; // Press button Y on start to activate debug mode
 
-// ###########################################################################
-// Array of button configurations
-// ###########################################################################
-constexpr uint8_t NUM_BUTTONS   = 15;
-ButtonInfo buttons[NUM_BUTTONS] = {
-    //@formatter:off
-    //                                            Classic                      FX                      VPX
-    {BTN_A_PIN,               ButtonType::BUTTON, ClassicBtn::A,               FxKey::A,               VpxKey::A,               HIGH, 0},
-    {BTN_B_PIN,               ButtonType::BUTTON, ClassicBtn::B,               FxKey::B,               VpxKey::B,               HIGH, 0},
-    {BTN_X_PIN,               ButtonType::BUTTON, ClassicBtn::X,               FxKey::X,               VpxKey::X,               HIGH, 0},
-    {BTN_Y_PIN,               ButtonType::BUTTON, ClassicBtn::Y,               FxKey::Y,               VpxKey::Y,               HIGH, 0},
-    {BTN_SELECT_PIN,          ButtonType::BUTTON, ClassicBtn::SELECT,          FxKey::SELECT,          VpxKey::SELECT,          HIGH, 0},
-    {BTN_START_PIN,           ButtonType::BUTTON, ClassicBtn::START,           FxKey::START,           VpxKey::START,           HIGH, 0},
-    {BTN_LAUNCH_PIN,          ButtonType::BUTTON, ClassicBtn::LAUNCH,          FxKey::LAUNCH,          VpxKey::LAUNCH,          HIGH, 0},
-    {BTN_LEFT_FLIPPER_PIN,    ButtonType::BUTTON, ClassicBtn::LEFT_FLIPPER,    FxKey::LEFT_FLIPPER,    VpxKey::LEFT_FLIPPER,    HIGH, 0},
-    {BTN_RIGHT_FLIPPER_PIN,   ButtonType::BUTTON, ClassicBtn::RIGHT_FLIPPER,   FxKey::RIGHT_FLIPPER,   VpxKey::RIGHT_FLIPPER,   HIGH, 0},
-    {BTN_LEFT_MAGNASAVE_PIN,  ButtonType::BUTTON, ClassicBtn::LEFT_MAGNASAVE,  FxKey::LEFT_MAGNASAVE,  VpxKey::LEFT_MAGNASAVE,  HIGH, 0},
-    {BTN_RIGHT_MAGNASAVE_PIN, ButtonType::BUTTON, ClassicBtn::RIGHT_MAGNASAVE, FxKey::RIGHT_MAGNASAVE, VpxKey::RIGHT_MAGNASAVE, HIGH, 0},
-    {DPAD_UP_PIN,             ButtonType::DPAD,   ClassicBtn::UP,              FxKey::UP,              VpxKey::UP,              HIGH, 0},
-    {DPAD_DOWN_PIN,           ButtonType::DPAD,   ClassicBtn::DOWN,            FxKey::DOWN,            VpxKey::DOWN,            HIGH, 0},
-    {DPAD_LEFT_PIN,           ButtonType::DPAD,   ClassicBtn::LEFT,            FxKey::LEFT,            VpxKey::LEFT,            HIGH, 0},
-    {DPAD_RIGHT_PIN,          ButtonType::DPAD,   ClassicBtn::RIGHT,           FxKey::RIGHT,           VpxKey::RIGHT,           HIGH, 0},
-    //@formatter:on
-};
-static_assert(NUM_BUTTONS == std::size(buttons), "NUM_BUTTONS mismatch");
-// ###########################################################################
+BleHidController hidController;
 
-BleHidController hid;
-Preferences config;
+// Mode configuration including flash storage
+Preferences nvsConfig;
 ControllerMode mode;
-
-bool configChanged        = false; // Flag to indicate if the configuration has changed and needs to be saved
-uint32_t lastConfigChange = 0;     // Timestamp of the last configuration change, used to throttle flash writes
+bool modeChanged        = false; // Flag to indicate if the controller mode has changed and needs to be saved to nvs
+uint32_t lastModeChange = 0;     // Timestamp of the last controller mode change, used to throttle flash writes
 
 AccelerometerManager accelManager;
 PlungerHandler plungerHandler;
 NudgeHandler nudgeHandler;
+ButtonManager buttonManager;
 
 // ISR handlers
 volatile bool changeModeIRQ = false;
@@ -55,45 +32,56 @@ static void IRAM_ATTR onChangeModeISR() { changeModeIRQ = true; }
 void setup() {
     Serial.begin(115200);
 
-    setLedColor(LedColor::RED);
+    // LED initialization
+    LedManager::setColor(LedColor::RED);
 
-    // Initialize buttons
-    for (const auto& button : buttons) {
-        pinMode(button.pin, INPUT_PULLUP);
-    }
+    // Initialize specific pins for debug mode and BLE bond deletion
+    pinMode(BTN_Y_PIN, INPUT_PULLUP);
+    pinMode(BTN_X_PIN, INPUT_PULLUP);
 
+    // Debug mode activation on Y button press
     if (digitalRead(BTN_Y_PIN) == LOW) {
-        DEBUG_MODE = true;
-        blink();
+        debugMode = true;
+        LedManager::blink();
         Serial.println("[setup] Debug mode activated!");
     }
 
-    // Initialize change mode button
+    // Change mode button initialization
     pinMode(CHANGE_MODE_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(CHANGE_MODE_PIN), onChangeModeISR, RISING);
 
-    // Initialize HID
-    hid.begin(DEVICE_NAME, DEVICE_MANUFACTURER);
+    // HID initialization and BLE bonds deletion on X button press
+    if (!hidController.begin(DEVICE_NAME, DEVICE_MANUFACTURER)) {
+        Serial.println("[setup] BLE HID initialization failed!");
+        LedManager::setColor(LedColor::RED);
+        while (true) {
+            delay(100);
+        }
+    }
     if (digitalRead(BTN_X_PIN) == LOW) {
         BleHidController::deleteAllBonds();
-        blink();
-        Serial.println("[setup] All BLE bonds deleted!");
+        LedManager::blink();
+        Serial.println("[setup] BLE bonds deleted!");
     }
 
-    // Initialize accelerometer
-    setupAccelerometer();
+    // Buttons initialization
+    buttonManager.begin(hidController);
 
-    // Initialize plunger
-    plungerHandler.setup();
+    // Plunger initialization
+    plungerHandler.begin(hidController);
 
-    // Initialize nudge
-    nudgeHandler.setup();
+    // Accelerometer initialization
+    // Ensure that the sensor remains stationary during calibration for accurate offset computation
+    accelManager.begin();
 
-    // Load saved mode
-    config.begin("ctrl_cfg", false);
-    const auto savedMode = static_cast<ControllerMode>(config.getUChar("mode", static_cast<uint8_t>(ControllerMode::FX)));
-    Serial.printf("[setup] Loaded mode from flash: %d\n", static_cast<int>(savedMode));
-    setMode(savedMode, true);
+    // Nudge initialization
+    nudgeHandler.begin(hidController, accelManager);
+
+    // NVS initialization and saved mode loading
+    nvsConfig.begin(NVS_NAMESPACE, false);
+    const auto nvsMode = static_cast<ControllerMode>(nvsConfig.getUChar("mode", static_cast<uint8_t>(ControllerMode::FX)));
+    Serial.printf("[setup] Loaded mode from flash: %d\n", nvsMode);
+    setMode(nvsMode, true);
 }
 
 void loop() {
@@ -107,74 +95,51 @@ void loop() {
 
     // Save configuration if changed, regardless of BLE connection state
     if (
-        configChanged &&
-        currentMillis - lastConfigChange > CONFIG_SAVE_INTERVAL_MS
+        modeChanged &&
+        currentMillis - lastModeChange > NVS_SAVE_INTERVAL_MS
     ) {
-        Serial.printf("[loop] Saving mode %d to flash...\n", static_cast<int>(mode));
-        config.putUChar("mode", static_cast<uint8_t>(mode));
+        Serial.printf("[loop] Saving mode %d to flash...\n", mode);
+        nvsConfig.putUChar("mode", static_cast<uint8_t>(mode));
         Serial.println("[loop] Configuration saved!");
-        configChanged = false;
+        modeChanged = false;
     }
 
     // Check BLE connection state before processing inputs
-    static bool wasConnected = true;
+    static bool s_wasConnected = true;
 
-    if (!BleHidController::isConnected()) {
-        if (wasConnected) {
-            wasConnected = false;
-            setLedColor(LedColor::RED);
+    if (!hidController.isConnected()) {
+        if (s_wasConnected) {
+            s_wasConnected = false;
+            LedManager::setColor(LedColor::RED);
         }
         delay(1000);
         return;
     }
 
-    if (!wasConnected) {
+    if (!s_wasConnected) {
         // Restore LED color based on current mode when connection is established
-        wasConnected = true;
-        setLedColor(MODE_COLORS[static_cast<uint8_t>(mode)]);
+        s_wasConnected = true;
+        LedManager::setColor(LedManager::MODE_COLORS[static_cast<uint8_t>(mode)]);
     }
 
     // Handle nudge detection from accelerometer
     if (mode == ControllerMode::FX) {
-        nudgeHandler.handleDigital(DEBUG_MODE);
+        nudgeHandler.handleDigital(debugMode);
     }
     else {
-        nudgeHandler.handleAnalog(DEBUG_MODE);
+        nudgeHandler.handleAnalog(debugMode);
     }
-
-    plungerHandler.handle(mode, DEBUG_MODE);
-
-    sendGamepadReport();
 
     // Handle button states
-    for (auto& button : buttons) {
-        handleButton(button);
-    }
-}
+    buttonManager.handle(mode);
 
-/**
- * Handle the state and debouncing of a button.
- *
- * This function processes the input from a specified button by checking its current
- * state, applying a debounce mechanism, and invoking the appropriate action based
- * on its state change. If the button's state differs from its previously recorded
- * state and the debounce threshold has been satisfied, the button state is updated,
- * and the corresponding action is executed.
- *
- * @param button A reference to a ButtonInfo object containing the button's information,
- * including its pin, current state, and last debounce time.
- */
-void handleButton(ButtonInfo& button) {
-    const auto currentMillis = millis();
-    if (currentMillis - button.lastDebounceTime < BTN_DEBOUNCE_MS) {
-        return;
+    // Handle plunger input (after buttons to avoid being overwritten)
+    if (mode == ControllerMode::VPX) {
+        plungerHandler.handle(debugMode);
     }
 
-    if (const int reading = digitalRead(button.pin); reading != button.state) {
-        button.state            = reading;
-        button.lastDebounceTime = currentMillis;
-        performButtonAction(getButtonAction(button), button.state == LOW);
-    }
+    // Send gamepad report
+    sendGamepadReport();
 }
 
 /**
@@ -196,160 +161,28 @@ void handleButton(ButtonInfo& button) {
  * configuration (true) or a runtime change initiated by user action (false).
  */
 void setMode(const ControllerMode newMode, const bool initialConfig) {
-    const uint32_t currentMillis   = millis();
-    static uint32_t lastChangeTime = 0;
+    const uint32_t currentMillis     = millis();
+    static uint32_t s_lastChangeTime = 0;
     if (
         !initialConfig &&
-        currentMillis - lastChangeTime < 700
+        currentMillis - s_lastChangeTime < 700
     )
         return;
-    lastChangeTime = currentMillis;
+    s_lastChangeTime = currentMillis;
 
     // Release all keys/buttons and reset dpad to centered before switching mode
     if (!initialConfig) {
-        hid.keyReleaseAll();
-        hid.sendGamepad(static_cast<uint16_t>(GamepadButton::NONE), static_cast<uint8_t>(DpadDirection::CENTERED), 0, 0, 0, 0);
+        hidController.keyReleaseAll();
+        hidController.sendGamepad(static_cast<uint16_t>(GamepadButton::NONE), static_cast<uint8_t>(DpadDirection::CENTERED), 0, 0, 0, 0);
         Serial.println("[setMode] Releasing all keys and resetting dpad");
     }
-    setLedColor(MODE_COLORS[static_cast<uint8_t>(newMode)]);
+    LedManager::setColor(LedManager::MODE_COLORS[static_cast<uint8_t>(newMode)]);
 
     mode = newMode;
-    Serial.printf("[setMode] mode set to %d (initialConfig=%d)\n", static_cast<int>(newMode), static_cast<int>(initialConfig));
+    Serial.printf("[setMode] mode set to %d (initialConfig=%d)\n", newMode, initialConfig);
     if (!initialConfig) {
-        configChanged    = true;
-        lastConfigChange = currentMillis;
-    }
-}
-
-/**
- * Set the color of the built-in RGB LED based on the specified color.
- *
- * This function updates the RGB LED's color using predefined brightness levels,
- * allowing for different visual indications depending on the current color setting.
- * The function relies on the RGB_BUILTIN macro to reference the built-in LED.
- *
- * Supported colors include:
- * - OFF: Turns the LED off.
- * - RED, GREEN, BLUE: Primary color settings.
- * - YELLOW, PURPLE, CYAN, WHITE: Secondary and mixed color settings.
- * - CLASSIC_MODE, FX_MODE, VPX_MODE: Modes associated with specific colors.
- *
- * @param color The desired LED color and/or mode. Must be one of the values defined in the LedColor enumeration.
- */
-void setLedColor(const LedColor color) {
-#ifdef RGB_BUILTIN
-    switch (color) {
-        //@formatter:off
-        case LedColor::OFF:             rgbLedWrite(RGB_BUILTIN, 0, 0, 0); break;
-        case LedColor::RED:             rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0); break;
-        case LedColor::CLASSIC_MODE:
-        case LedColor::GREEN:           rgbLedWrite(RGB_BUILTIN, 0, RGB_BRIGHTNESS, 0); break;
-        case LedColor::FX_MODE:
-        case LedColor::BLUE:            rgbLedWrite(RGB_BUILTIN, 0, 0, RGB_BRIGHTNESS); break;
-        case LedColor::YELLOW:          rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, RGB_BRIGHTNESS, 0); break;
-        case LedColor::VPX_MODE:
-        case LedColor::PURPLE:          rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, RGB_BRIGHTNESS); break;
-        case LedColor::CYAN:            rgbLedWrite(RGB_BUILTIN, 0, RGB_BRIGHTNESS, RGB_BRIGHTNESS); break;
-        case LedColor::WHITE:           rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, RGB_BRIGHTNESS, RGB_BRIGHTNESS); break;
-        default: break;
-        //@formatter:on
-    }
-#endif
-}
-
-/**
- * Blink the built-in RGB LED a specified number of times with the given color
- *
- * If RGB support is not available (RGB_BUILTIN not defined) the function is a no-op
- * to allow safe calls from code that may run on hardware without an RGB LED
- *
- * @param color The LedColor value to show during the blink on-phase
- * @param times Number of on/off cycles to perform
- */
-void blink(const LedColor color, const uint8_t times) {
-#ifdef RGB_BUILTIN
-    for (uint8_t i = 0; i < times; ++i) {
-        setLedColor(color);
-        delay(200);
-        setLedColor(LedColor::OFF);
-        delay(200);
-    }
-#else
-    (void)color;
-    (void)times;
-#endif
-}
-
-/**
- * Setup and initialize the accelerometer using the AccelerometerManager
- *
- * @note Ensure that the sensor remains stationary during calibration for accurate offset computation.
- */
-void setupAccelerometer() {
-    accelManager.begin();
-}
-
-/**
- * Executes the specified button action based on the given input state.
- *
- * @param action A reference to the ButtonAction object, specifying the type of action and associated data such as key code, button code, or dpad value.
- * @param isPressed A boolean indicating whether the button is currently pressed (true) or released (false).
- */
-void performButtonAction(const ButtonAction& action, const bool isPressed) {
-    switch (action.type) {
-        //@formatter:off
-        case ActionType::KEYBOARD_KEY:
-            if (isPressed)                  hid.keyPress(action.keyCode);
-            else                            hid.keyRelease(action.keyCode);
-            break;
-        case ActionType::GAMEPAD_BUTTON:
-            if (isPressed)                  hid.buttonPress(action.buttonCode);
-            else                            hid.buttonRelease(action.buttonCode);
-            break;
-        case ActionType::GAMEPAD_DPAD:
-            if (isPressed)                  hid.dpadPress(action.dpadValue);
-            else                            hid.dpadRelease();
-            break;
-        case ActionType::GAMEPAD_LT:
-            if (isPressed)                  hid.setLeftTrigger(1023);
-            else                            hid.setLeftTrigger(0);
-            break;
-        case ActionType::GAMEPAD_RT:
-            if (isPressed)                  hid.setRightTrigger(1023);
-            else                            hid.setRightTrigger(0);
-            break;
-        case ActionType::NONE:
-        default:
-            break;
-        //@formatter:on
-    }
-}
-
-
-/**
- * Determines the appropriate button action based on the current controller mode and button information.
- *
- * @param button Reference to the ButtonInfo object containing button-specific data, such as button type and associated codes for each controller mode.
- * @return A ButtonAction object representing the action to be performed, including the action type and any specific parameters (e.g., keyCode, dpadValue, buttonCode) required for the action.
- */
-ButtonAction getButtonAction(const ButtonInfo& button) {
-    switch (mode) {
-        //@formatter:off
-        case ControllerMode::FX:
-            return {.type = ActionType::KEYBOARD_KEY, .keyCode = static_cast<uint8_t>(button.fxKey)};
-        case ControllerMode::VPX:
-            return {.type = ActionType::KEYBOARD_KEY, .keyCode = static_cast<uint8_t>(button.vpxKey)};
-        case ControllerMode::CLASSIC:
-            if (button.type == ButtonType::DPAD)
-                return {.type = ActionType::GAMEPAD_DPAD, .dpadValue = static_cast<uint8_t>(button.classicCode)};
-            if (static_cast<uint16_t>(button.classicCode) == TRIGGER_LEFT)
-                return {.type = ActionType::GAMEPAD_LT};
-            if (static_cast<uint16_t>(button.classicCode) == TRIGGER_RIGHT)
-                return {.type = ActionType::GAMEPAD_RT};
-            return {.type = ActionType::GAMEPAD_BUTTON, .buttonCode = static_cast<uint16_t>(button.classicCode)};
-        default:
-            return {.type = ActionType::NONE};
-        //@formatter:on
+        modeChanged    = true;
+        lastModeChange = currentMillis;
     }
 }
 
@@ -358,12 +191,10 @@ ButtonAction getButtonAction(const ButtonInfo& button) {
  * Centralizes all gamepad state flushing to avoid redundant or conflicting sends.
  */
 void sendGamepadReport() {
-    const uint32_t now               = micros();
-    static uint32_t lastReportMicros = 0;
-    if (now - lastReportMicros < GAMEPAD_REPORT_INTERVAL_US) return;
-    lastReportMicros = now;
+    const uint32_t now                 = micros();
+    static uint32_t s_lastReportMicros = 0;
+    if (now - s_lastReportMicros < GAMEPAD_REPORT_INTERVAL_US) return;
+    s_lastReportMicros = now;
 
-    hid.sendGamepadState();
+    hidController.sendGamepadState();
 }
-
-

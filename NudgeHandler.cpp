@@ -3,14 +3,29 @@
 #include "BleHidController.h"
 #include <Arduino.h>
 
-extern AccelerometerManager accelManager;
-extern BleHidController hid;
-
-NudgeHandler::NudgeHandler() {
+NudgeHandler::NudgeHandler() 
+    : m_hidController(nullptr)
+    , m_accelManager(nullptr)
+    , m_lastSampleMicros(0)
+    , m_lastReportMicros(0)
+    , m_lastEvalMicros(0)
+    , m_lastPrint(0)
+    , m_lastReset(0)
+    , m_maxAccX(0.0f)
+    , m_maxAccY(0.0f)
+    , m_maxVelX(0.0f)
+    , m_maxVelY(0.0f)
+    , m_maxLeftX(0)
+    , m_maxLeftY(0)
+    , m_maxRightX(0)
+    , m_maxRightY(0)
+    , m_peakX(0.0f)
+    , m_peakY(0.0f) {
 }
 
-void NudgeHandler::setup() {
-    // Initialization is handled in process() when first called
+void NudgeHandler::begin(BleHidController& hidController, AccelerometerManager& accelManager) {
+    m_hidController = &hidController;
+    m_accelManager = &accelManager;
 }
 
 /**
@@ -20,8 +35,9 @@ void NudgeHandler::setup() {
  * @param yr Reference to store the calibrated and adjusted Y-axis acceleration
  * @return True if the acceleration values are successfully read and adjusted; false otherwise
  */
-bool readAccelRaw(int16_t& xr, int16_t& yr) {
-    return accelManager.readRaw(xr, yr);
+bool NudgeHandler::readAccelRaw(int16_t& xr, int16_t& yr) {
+    if (!m_accelManager) return false;
+    return m_accelManager->readRaw(xr, yr);
 }
 
 /**
@@ -33,9 +49,8 @@ bool readAccelRaw(int16_t& xr, int16_t& yr) {
 bool NudgeHandler::sampleNudge() {
     const uint32_t now = micros();
 
-    static uint32_t lastSampleMicros = 0;
-    if (now - lastSampleMicros < NUDGE_SAMPLE_INTERVAL_US) return false;
-    lastSampleMicros = now;
+    if (now - m_lastSampleMicros < NUDGE_SAMPLE_INTERVAL_US) return false;
+    m_lastSampleMicros = now;
 
     int16_t rx, ry;
 
@@ -64,10 +79,8 @@ void NudgeHandler::handleAnalog(bool debugMode) {
 
     sampleNudge();
 
-    static uint32_t lastReportMicros = 0;
-
-    if (now - lastReportMicros < ANALOG_NUDGE_REPORT_INTERVAL_US) return;
-    lastReportMicros = now;
+    if (now - m_lastReportMicros < ANALOG_NUDGE_REPORT_INTERVAL_US) return;
+    m_lastReportMicros = now;
 
     const float accX = m_nudgeX.acceleration;
     const float accY = m_nudgeY.acceleration;
@@ -83,49 +96,44 @@ void NudgeHandler::handleAnalog(bool debugMode) {
     const int16_t rightY = static_cast<int16_t>(std::clamp(velY * ANALOG_NUDGE_VELOCITY_SCALE, -32767.0f, 32767.0f));
 
     // Send both axes together
-    hid.setLeftStick(leftX, leftY, false);
-    hid.setRightStick(rightX, rightY, false);
+    if (m_hidController) {
+        m_hidController->setLeftStick(leftX, leftY, false);
+        m_hidController->setRightStick(rightX, rightY, false);
+    }
     // hid.sendGamepadState();
 
     if (debugMode) {
-        static uint32_t lastPrint = 0, lastReset = 0;
+        if (fabsf(m_nudgeX.acceleration) > fabsf(m_maxAccX)) m_maxAccX = m_nudgeX.acceleration;
+        if (fabsf(m_nudgeY.acceleration) > fabsf(m_maxAccY)) m_maxAccY = m_nudgeY.acceleration;
 
-        static float maxAccX     = 0.0f, maxAccY = 0.0f,
-                     maxVelX     = 0.0f, maxVelY = 0.0f;
-        static int16_t maxLeftX  = 0, maxLeftY   = 0,
-                       maxRightX = 0, maxRightY  = 0;
+        if (fabsf(m_nudgeX.velocity) > fabsf(m_maxVelX)) m_maxVelX = m_nudgeX.velocity;
+        if (fabsf(m_nudgeY.velocity) > fabsf(m_maxVelY)) m_maxVelY = m_nudgeY.velocity;
 
-        if (fabsf(m_nudgeX.acceleration) > fabsf(maxAccX)) maxAccX = m_nudgeX.acceleration;
-        if (fabsf(m_nudgeY.acceleration) > fabsf(maxAccY)) maxAccY = m_nudgeY.acceleration;
+        if (abs(leftX) > abs(m_maxLeftX)) m_maxLeftX = leftX;
+        if (abs(leftY) > abs(m_maxLeftY)) m_maxLeftY = leftY;
 
-        if (fabsf(m_nudgeX.velocity) > fabsf(maxVelX)) maxVelX = m_nudgeX.velocity;
-        if (fabsf(m_nudgeY.velocity) > fabsf(maxVelY)) maxVelY = m_nudgeY.velocity;
+        if (abs(rightX) > abs(m_maxRightX)) m_maxRightX = rightX;
+        if (abs(rightY) > abs(m_maxRightY)) m_maxRightY = rightY;
 
-        if (abs(leftX) > abs(maxLeftX)) maxLeftX = leftX;
-        if (abs(leftY) > abs(maxLeftY)) maxLeftY = leftY;
-
-        if (abs(rightX) > abs(maxRightX)) maxRightX = rightX;
-        if (abs(rightY) > abs(maxRightY)) maxRightY = rightY;
-
-        if (now - lastPrint > 1000000) {
+        if (now - m_lastPrint > 1000000) {
             Serial.printf(
                 "maxAcc[%7.1f, %7.1f] / maxVel[%7.1f, %7.1f] "
                 "*** maxLeftStick[%6d, %6d] / maxRightStick[%6d, %6d]\n",
-                maxAccX, maxAccY, maxVelX, maxVelY,
-                maxLeftX, maxLeftY, maxRightX, maxRightY);
-            lastPrint = now;
+                m_maxAccX, m_maxAccY, m_maxVelX, m_maxVelY,
+                m_maxLeftX, m_maxLeftY, m_maxRightX, m_maxRightY);
+            m_lastPrint = now;
 
-            if (now - lastReset > 5000000) {
+            if (now - m_lastReset > 5000000) {
                 Serial.println("\nResetting debug counters...");
-                maxAccX   = 0.0f;
-                maxAccY   = 0.0f;
-                maxVelX   = 0.0f;
-                maxVelY   = 0.0f;
-                maxLeftX  = 0;
-                maxLeftY  = 0;
-                maxRightX = 0;
-                maxRightY = 0;
-                lastReset = now;
+                m_maxAccX   = 0.0f;
+                m_maxAccY   = 0.0f;
+                m_maxVelX   = 0.0f;
+                m_maxVelY   = 0.0f;
+                m_maxLeftX  = 0;
+                m_maxLeftY  = 0;
+                m_maxRightX = 0;
+                m_maxRightY = 0;
+                m_lastReset = now;
             }
         }
     }
@@ -153,23 +161,20 @@ void NudgeHandler::handleAnalog(bool debugMode) {
 void NudgeHandler::handleDigital(bool debugMode) {
     const uint32_t now = micros();
 
-    static float peakX = 0.0f, peakY = 0.0f;
-
     // Accumulate peak acceleration for direction detection over the evaluation window
     if (sampleNudge()) {
-        if (fabsf(m_nudgeX.acceleration) > fabsf(peakX)) peakX = m_nudgeX.acceleration;
-        if (fabsf(m_nudgeY.acceleration) > fabsf(peakY)) peakY = m_nudgeY.acceleration;
+        if (fabsf(m_nudgeX.acceleration) > fabsf(m_peakX)) m_peakX = m_nudgeX.acceleration;
+        if (fabsf(m_nudgeY.acceleration) > fabsf(m_peakY)) m_peakY = m_nudgeY.acceleration;
     }
 
     /**
      * State evaluation
      */
-    static uint32_t lastEvalMicros = 0;
-    if (now - lastEvalMicros < DIGITAL_NUDGE_EVAL_INTERVAL_US) return;
-    lastEvalMicros = now;
+    if (now - m_lastEvalMicros < DIGITAL_NUDGE_EVAL_INTERVAL_US) return;
+    m_lastEvalMicros = now;
 
-    const float absPeakX      = fabsf(peakX);
-    const float absPeakY      = fabsf(peakY);
+    const float absPeakX      = fabsf(m_peakX);
+    const float absPeakY      = fabsf(m_peakY);
     const bool aboveThreshold = absPeakX > static_cast<float>(DIGITAL_NUDGE_THRESHOLD) || absPeakY > static_cast<float>(DIGITAL_NUDGE_THRESHOLD);
     const uint32_t nowMs      = millis();
 
@@ -188,12 +193,14 @@ void NudgeHandler::handleDigital(bool debugMode) {
 
         // Determine nudge direction from the dominant peak axis
         if (absPeakY >= absPeakX) {
-            if (peakY > 0) m_nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD);
+            if (m_peakY > 0) m_nudgeState.nudgeKey = static_cast<uint8_t>(FxNudgeKey::FORWARD);
         }
         else {
-            m_nudgeState.nudgeKey = static_cast<uint8_t>(peakX < 0 ? FxNudgeKey::LEFT : FxNudgeKey::RIGHT);
+            m_nudgeState.nudgeKey = static_cast<uint8_t>(m_peakX < 0 ? FxNudgeKey::LEFT : FxNudgeKey::RIGHT);
         }
-        if (m_nudgeState.nudgeKey != 0) hid.keyPress(m_nudgeState.nudgeKey);
+        if (m_nudgeState.nudgeKey != 0 && m_hidController) {
+            m_hidController->keyPress(m_nudgeState.nudgeKey);
+        }
     }
     // Nudge release (hysteresis)
     else if (
@@ -203,13 +210,13 @@ void NudgeHandler::handleDigital(bool debugMode) {
         nowMs - m_nudgeState.lastNudgeMillis > DIGITAL_NUDGE_RESET_MS
     ) {
         m_nudgeState.isNudging = false;
-        if (m_nudgeState.nudgeKey != 0) {
-            hid.keyRelease(m_nudgeState.nudgeKey);
+        if (m_nudgeState.nudgeKey != 0 && m_hidController) {
+            m_hidController->keyRelease(m_nudgeState.nudgeKey);
             m_nudgeState.nudgeKey = 0;
         }
     }
 
     // Reset peak accumulators for the next evaluation window
-    peakX = 0.0f;
-    peakY = 0.0f;
+    m_peakX = 0.0f;
+    m_peakY = 0.0f;
 }

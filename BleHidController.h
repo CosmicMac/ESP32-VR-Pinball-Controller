@@ -2,21 +2,23 @@
 
 #include "NimBLEDevice.h"
 #include "NimBLEHIDDevice.h"
+#include "NimBLEServer.h"
 #include "HidConstants.h"
+#include "config.h"
 
-constexpr int8_t BLE_TX_POWER        = 9;  // dBm
-constexpr uint8_t BATTERY_LEVEL      = 66; // %
-constexpr uint8_t PNP_VENDOR_SRC_USB = 0x02;
-
-
-class BleHidController
+class BleHidController : public NimBLEServerCallbacks
 {
 public:
     BleHidController();
+    ~BleHidController();
 
-    void begin(
-        const char* deviceName         = "BLE HID Controller",
-        const char* deviceManufacturer = "CosmicMac",
+    // Rule of Five: prevent copying
+    BleHidController(const BleHidController&) = delete;
+    BleHidController& operator=(const BleHidController&) = delete;
+
+    bool begin(
+        const char* deviceName         = DEVICE_NAME,
+        const char* deviceManufacturer = DEVICE_MANUFACTURER,
         uint16_t vendorId              = 0x1234,
         uint16_t productId             = 0x5678,
         uint16_t version               = 0x0100
@@ -24,29 +26,33 @@ public:
 
     static void deleteAllBonds();
 
-    static bool isConnected() { return _deviceConnected; }
+    bool isConnected() const { return m_deviceConnected; }
 
     // Keyboard API
-    void keyModPress(uint8_t modifier);
-    void keyModRelease(uint8_t modifier);
-    void keyPress(uint8_t keycode);
-    void keyRelease(uint8_t keycode);
-    void keyReleaseAll();
+    bool keyModPress(uint8_t modifier);
+    bool keyModRelease(uint8_t modifier);
+    bool keyPress(uint8_t keycode);
+    bool keyRelease(uint8_t keycode);
+    bool keyReleaseAll();
 
     // Gamepad API
-    void sendGamepad(uint16_t buttons, uint8_t dpad, int16_t lx, int16_t ly, int16_t rx, int16_t ry, uint16_t lt = 0, uint16_t rt = 0);
-    void buttonPress(uint16_t button);
-    void buttonRelease(uint16_t button);
-    void dpadPress(uint8_t dpad);
-    void dpadRelease();
-    void setLeftStick(int16_t lx, int16_t ly, bool sendState = true);
-    void setRightStick(int16_t rx, int16_t ry, bool sendState = true);
-    void setLeftTrigger(uint16_t lt, bool sendState = true);
-    void setRightTrigger(uint16_t rt, bool sendState = true);
-    void sendGamepadState();
+    bool sendGamepad(uint16_t buttons, uint8_t dpad, int16_t lx, int16_t ly, int16_t rx, int16_t ry, int16_t lt = 0, int16_t rt = 0);
+    bool buttonPress(uint16_t button);
+    bool buttonRelease(uint16_t button);
+    bool dpadPress(uint8_t dpad);
+    bool dpadRelease();
+    bool setLeftStick(int16_t lx, int16_t ly, bool sendState = true);
+    bool setRightStick(int16_t rx, int16_t ry, bool sendState = true);
+    bool setLeftTrigger(int16_t lt, bool sendState = true);
+    bool setRightTrigger(int16_t rt, bool sendState = true);
+    bool sendGamepadState();
+
+    // NimBLEServerCallbacks
+    void onConnect(NimBLEServer* pSrv, NimBLEConnInfo& connInfo) override;
+    void onDisconnect(NimBLEServer* pSrv, NimBLEConnInfo& connInfo, int reason) override;
 
 private:
-    void sendKeyboardState();
+    bool sendKeyboardState();
 
     struct KeyReport
     {
@@ -70,20 +76,17 @@ private:
         int16_t leftY    = 0;                                             // Left stick Y (Y axis, -32768–32767)
         int16_t rightX   = 0;                                             // Right stick X (Rx axis, -32768–32767)
         int16_t rightY   = 0;                                             // Right stick Y (Ry axis, -32768–32767)
-        uint16_t lt      = 0;                                             // Left trigger  (Z  axis, 0–32767)
-        uint16_t rt      = 0;                                             // Right trigger (Rz axis, 0–32767)
+        int16_t lt       = 0;                                             // Left trigger  (Z  axis, 0–32767)
+        int16_t rt       = 0;                                             // Right trigger (Rz axis, 0–32767)
     };
 
-    static bool _deviceConnected;
+    bool m_deviceConnected{false};
 
-    NimBLEServer* _server{};
-    NimBLEHIDDevice* _hidDevice{};
-    NimBLECharacteristic* _kbInputReport{};
-    NimBLECharacteristic* _gpInputReport{};
+    NimBLEServer* m_server{};
+    NimBLEHIDDevice* m_hidDevice{};
+    NimBLECharacteristic* m_kbInputReport{};
+    NimBLECharacteristic* m_gpInputReport{};
 
-    KeyReport _kbState{};
-    GamepadReport _gpState{};
-
-    class ServerCallbacks;
-    friend class ServerCallbacks;
+    KeyReport m_kbState{};
+    GamepadReport m_gpState{};
 };

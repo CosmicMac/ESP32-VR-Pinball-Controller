@@ -1,6 +1,10 @@
 #pragma once
 #include "config.h"
 
+// Forward declarations
+class BleHidController;
+class AccelerometerManager;
+
 /**
  * Jitter Filter (hysteresis window)
  * Stabilizes a signal by absorbing small fluctuations within a sliding window
@@ -104,24 +108,49 @@ struct NudgeProcess
 
 struct NudgeState
 {
-    unsigned long lastNudgeMillis = 0;
-    bool isNudging                = false;
-    uint8_t nudgeKey              = 0;
+    uint32_t lastNudgeMillis = 0;
+    bool isNudging           = false;
+    uint8_t nudgeKey         = 0;
 };
 
-class NudgeHandler {
+class NudgeHandler
+{
 public:
     NudgeHandler();
     ~NudgeHandler() = default;
 
-    void setup();
+    void begin(BleHidController& hidController, AccelerometerManager& accelManager);
     void handleAnalog(bool debugMode);
     void handleDigital(bool debugMode);
 
 private:
     bool sampleNudge();
-    
+    bool readAccelRaw(int16_t& xr, int16_t& yr);
+
     NudgeState m_nudgeState;
     NudgeProcess m_nudgeX;
     NudgeProcess m_nudgeY;
+    BleHidController* m_hidController;
+    AccelerometerManager* m_accelManager;
+
+    // Timing variables (moved from static in functions)
+    uint32_t m_lastSampleMicros = 0;
+    uint32_t m_lastReportMicros = 0;
+    uint32_t m_lastEvalMicros   = 0;
+
+    // Analog nudge debug variables
+    uint32_t m_lastPrint = 0;
+    uint32_t m_lastReset = 0;
+    float m_maxAccX      = 0.0f;
+    float m_maxAccY      = 0.0f;
+    float m_maxVelX      = 0.0f;
+    float m_maxVelY      = 0.0f;
+    int16_t m_maxLeftX   = 0;
+    int16_t m_maxLeftY   = 0;
+    int16_t m_maxRightX  = 0;
+    int16_t m_maxRightY  = 0;
+
+    // Digital nudge peak accumulators
+    float m_peakX = 0.0f;
+    float m_peakY = 0.0f;
 };

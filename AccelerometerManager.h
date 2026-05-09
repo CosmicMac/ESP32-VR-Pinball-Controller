@@ -13,7 +13,7 @@ public:
     bool readRaw(int16_t& x, int16_t& y, int16_t& z);
 
 private:
-    std::unique_ptr<IAccelerometer> sensor;
+    std::unique_ptr<IAccelerometer> m_sensor;
     
     void applyRotationAndFlip(int16_t& x, int16_t& y);
 };
