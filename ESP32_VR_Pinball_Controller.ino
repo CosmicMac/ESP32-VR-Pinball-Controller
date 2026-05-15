@@ -1,13 +1,15 @@
 #include <Arduino.h>
 #include <Preferences.h>
-#include "LedManager.h"
-#include "BleHidController.h"
-#include "AccelerometerManager.h"
-#include "PlungerHandler.h"
-#include "NudgeHandler.h"
-#include "ButtonManager.h"
-#include "ESP32_VR_Pinball_Controller.h"
-#include "config.h"
+#include "src/LedManager.h"
+#include "src/BleHidController.h"
+#include "src/AccelerometerManager.h"
+#include "src/PlungerHandler.h"
+#include "src/NudgeHandler.h"
+#include "src/ButtonManager.h"
+#include "src/ESP32_VR_Pinball_Controller.h"
+#include "src/config.h"
+
+constexpr uint32_t MODE_DEBOUNCE_MS = 700;
 
 bool debugMode = false; // Press button Y on start to activate debug mode
 
@@ -26,7 +28,12 @@ ButtonManager buttonManager;
 
 // ISR handlers
 volatile bool changeModeIRQ = false;
-static void IRAM_ATTR onChangeModeISR() { changeModeIRQ = true; }
+portMUX_TYPE changeModeMux = portMUX_INITIALIZER_UNLOCKED;
+static void IRAM_ATTR onChangeModeISR() { 
+    portENTER_CRITICAL_ISR(&changeModeMux);
+    changeModeIRQ = true;
+    portEXIT_CRITICAL_ISR(&changeModeMux);
+}
 
 
 void setup() {
@@ -53,11 +60,10 @@ void setup() {
     // HID initialization and BLE bonds deletion on X button press
     if (!hidController.begin(DEVICE_NAME, DEVICE_MANUFACTURER)) {
         Serial.println("[setup] BLE HID initialization failed!");
-        LedManager::setColor(LedColor::RED);
-        while (true) {
-            delay(100);
-        }
+        LedManager::blink(LedColor::RED, 10);
+        ESP.restart();
     }
+
     if (digitalRead(BTN_X_PIN) == LOW) {
         BleHidController::deleteAllBonds();
         LedManager::blink();
@@ -78,18 +84,26 @@ void setup() {
     nudgeHandler.begin(hidController, accelManager);
 
     // NVS initialization and saved mode loading
-    nvsConfig.begin(NVS_NAMESPACE, false);
-    const auto nvsMode = static_cast<ControllerMode>(nvsConfig.getUChar("mode", static_cast<uint8_t>(ControllerMode::FX)));
-    Serial.printf("[setup] Loaded mode from flash: %d\n", nvsMode);
-    setMode(nvsMode, true);
+    if (!nvsConfig.begin(NVS_NAMESPACE, false)) {
+        Serial.println("[setup] NVS initialization failed! Using default mode.");
+        setMode(ControllerMode::FX, true);
+    } else {
+        const auto nvsMode = static_cast<ControllerMode>(nvsConfig.getUChar("mode", static_cast<uint8_t>(ControllerMode::FX)));
+        Serial.printf("[setup] Loaded mode from flash: %d\n", nvsMode);
+        setMode(nvsMode, true);
+    }
 }
 
 void loop() {
     const auto currentMillis = millis();
 
     // If change mode button was pressed, cycle through modes
-    if (changeModeIRQ) {
-        changeModeIRQ = false;
+    portENTER_CRITICAL(&changeModeMux);
+    bool modeChangeRequested = changeModeIRQ;
+    changeModeIRQ = false;
+    portEXIT_CRITICAL(&changeModeMux);
+
+    if (modeChangeRequested) {
         setMode(static_cast<ControllerMode>((static_cast<uint8_t>(mode) + 1) % static_cast<uint8_t>(ControllerMode::count)));
     }
 
@@ -99,20 +113,22 @@ void loop() {
         currentMillis - lastModeChange > NVS_SAVE_INTERVAL_MS
     ) {
         Serial.printf("[loop] Saving mode %d to flash...\n", mode);
-        nvsConfig.putUChar("mode", static_cast<uint8_t>(mode));
-        Serial.println("[loop] Configuration saved!");
+        if (nvsConfig.putUChar("mode", static_cast<uint8_t>(mode))) {
+            Serial.println("[loop] Configuration saved!");
+        } else {
+            Serial.println("[loop] Failed to save configuration to NVS!");
+        }
         modeChanged = false;
     }
 
     // Check BLE connection state before processing inputs
-    static bool s_wasConnected = true;
+    static bool s_wasConnected = false;
 
     if (!hidController.isConnected()) {
         if (s_wasConnected) {
             s_wasConnected = false;
             LedManager::setColor(LedColor::RED);
         }
-        delay(1000);
         return;
     }
 
@@ -148,7 +164,7 @@ void loop() {
  * This function updates the controller's mode to the specified value, performs any necessary
  * cleanup for the current mode, and applies the settings for the new mode. If `initialConfig`
  * is false, a debounce mechanism ensures that the mode cannot be changed more than once
- * within a 700ms interval.
+ * within a MODE_DEBOUNCE_MS interval.
  *
  * When transitioning between modes (i.e., if `initialConfig` is false), all currently pressed
  * keys or buttons are released, and the d-pad is reset to its centered position. The LED color
@@ -165,7 +181,7 @@ void setMode(const ControllerMode newMode, const bool initialConfig) {
     static uint32_t s_lastChangeTime = 0;
     if (
         !initialConfig &&
-        currentMillis - s_lastChangeTime < 700
+        currentMillis - s_lastChangeTime < MODE_DEBOUNCE_MS
     )
         return;
     s_lastChangeTime = currentMillis;

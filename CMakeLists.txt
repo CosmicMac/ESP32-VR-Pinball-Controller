@@ -25,9 +25,7 @@ set(PLATFORM_LIBS_DIRS                      # Built-in ESP32 platform libraries 
         "Preferences"
         "Wire"
 )
-#set(ARDUINO_EXTRA_FLAGS                     # Extra flags for compilation
-#        "-DGAMEPAD_ENABLE=true"
-#)
+set(ARDUINO_EXTRA_FLAGS "")                 # Extra flags for compilation (e.g. "-DGAMEPAD_ENABLE=true")
 
 ##############################################################################
 # Get compilation properties via arduino-cli
@@ -36,15 +34,21 @@ execute_process(
         COMMAND ${ARDUINO_CLI} compile --fqbn ${FQBN} --show-properties
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         OUTPUT_VARIABLE ARDUINO_PROPERTIES
+        RESULT_VARIABLE ARDUINO_CLI_RESULT
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
 )
 
+if (NOT ARDUINO_CLI_RESULT EQUAL 0)
+    message(FATAL_ERROR "arduino-cli failed to execute or returned an error. Ensure it is installed and in your PATH.")
+endif()
+
 # Helper function to extract a property from the raw output
 function(extract_arduino_property PROP_NAME OUTPUT_VAR INPUT_TEXT)
-    string(REGEX MATCH "${PROP_NAME}=([^\n]+)" MATCHED "${INPUT_TEXT}")
+    string(REPLACE "." "\\." SAFE_PROP_NAME "${PROP_NAME}")
+    string(REGEX MATCH "${SAFE_PROP_NAME}=([^\n]+)" MATCHED "${INPUT_TEXT}")
     if (MATCHED)
-        string(REGEX REPLACE "${PROP_NAME}=" "" RESULT "${MATCHED}")
+        string(REGEX REPLACE "${SAFE_PROP_NAME}=" "" RESULT "${MATCHED}")
         # Remove any carriage returns (Windows)
         string(STRIP "${RESULT}" RESULT)
         set(${OUTPUT_VAR} "${RESULT}" PARENT_SCOPE)
@@ -62,10 +66,15 @@ extract_arduino_property("compiler.sdk.path" SDK_PATH "${ARDUINO_PROPERTIES}")
 # Get the user libraries folder
 ##############################################################################
 execute_process(
-        COMMAND arduino-cli config get directories.user
+        COMMAND ${ARDUINO_CLI} config get directories.user
         OUTPUT_VARIABLE ARDUINO_USER_DIR
+        RESULT_VARIABLE ARDUINO_USER_DIR_RESULT
         OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+
+if (NOT ARDUINO_USER_DIR_RESULT EQUAL 0)
+    message(FATAL_ERROR "arduino-cli failed to get user directories.")
+endif()
 
 set(ARDUINO_LIBRARIES_DIR "${ARDUINO_USER_DIR}/libraries")
 
@@ -79,8 +88,9 @@ file(GLOB_RECURSE SOURCES
         "${CMAKE_SOURCE_DIR}/*.c"
         "${CMAKE_SOURCE_DIR}/*.h"
 )
-# Exclude git files
+# Exclude git files and common build directories
 list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_SOURCE_DIR}/\\.git/.*")
+list(FILTER SOURCES EXCLUDE REGEX "${CMAKE_SOURCE_DIR}/(cmake-build-.*|build)/.*")
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 # Force the language (CLion does not know that .ino is C++)
@@ -89,7 +99,7 @@ set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CXX)
 ##############################################################################
 # Injection of Includes
 ##############################################################################
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
 
 if (CORE_PATH)
     target_include_directories(${PROJECT_NAME} PRIVATE ${CORE_PATH})
