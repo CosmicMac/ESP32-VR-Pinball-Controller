@@ -45,6 +45,7 @@ void setup() {
     // Initialize specific pins for debug mode and BLE bond deletion
     pinMode(BTN_Y_PIN, INPUT_PULLUP);
     pinMode(BTN_X_PIN, INPUT_PULLUP);
+    delay(100);
 
     // Debug mode activation on Y button press
     if (digitalRead(BTN_Y_PIN) == LOW) {
@@ -83,12 +84,13 @@ void setup() {
     // Nudge initialization
     nudgeHandler.begin(hidController, accelManager);
 
-    // NVS initialization and saved mode loading
-    if (!nvsConfig.begin(NVS_NAMESPACE, false)) {
+    // NVS: open, read saved mode, then close to free the handle
+    if (!nvsConfig.begin(NVS_NAMESPACE, true)) { // read-only
         Serial.println("[setup] NVS initialization failed! Using default mode.");
         setMode(ControllerMode::FX, true);
     } else {
         const auto nvsMode = static_cast<ControllerMode>(nvsConfig.getUChar("mode", static_cast<uint8_t>(ControllerMode::FX)));
+        nvsConfig.end();
         Serial.printf("[setup] Loaded mode from flash: %d\n", nvsMode);
         setMode(nvsMode, true);
     }
@@ -108,15 +110,21 @@ void loop() {
     }
 
     // Save configuration if changed, regardless of BLE connection state
+    // Open/write/close on each save to avoid holding the NVS handle open
     if (
         modeChanged &&
         currentMillis - lastModeChange > NVS_SAVE_INTERVAL_MS
     ) {
         Serial.printf("[loop] Saving mode %d to flash...\n", mode);
-        if (nvsConfig.putUChar("mode", static_cast<uint8_t>(mode))) {
-            Serial.println("[loop] Configuration saved!");
+        if (nvsConfig.begin(NVS_NAMESPACE, false)) { // read-write
+            if (nvsConfig.putUChar("mode", static_cast<uint8_t>(mode))) {
+                Serial.println("[loop] Configuration saved!");
+            } else {
+                Serial.println("[loop] Failed to save configuration to NVS!");
+            }
+            nvsConfig.end();
         } else {
-            Serial.println("[loop] Failed to save configuration to NVS!");
+            Serial.println("[loop] Failed to open NVS for writing!");
         }
         modeChanged = false;
     }
@@ -129,6 +137,7 @@ void loop() {
             s_wasConnected = false;
             LedManager::setColor(LedColor::RED);
         }
+        yield();
         return;
     }
 

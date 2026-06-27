@@ -50,12 +50,16 @@ void AccelerometerManager::applyRotationAndFlip(int16_t& x, int16_t& y) {
     int16_t xr = x, yr = y;
     
     // Rotation around Z axis (CCW, viewed from +Z)
-    switch (ACCEL_SENSOR_ROTATION) {
-        case 0:     xr = x;     yr = y;     break;
-        case 90:    xr = -y;    yr = x;     break;
-        case 180:   xr = -x;    yr = -y;    break;
-        case 270:   xr = y;     yr = -x;    break;
-        default:    xr = x;     yr = y;     break;
+    if constexpr (ACCEL_SENSOR_ROTATION == 0) {
+        xr = x;  yr = y;
+    } else if constexpr (ACCEL_SENSOR_ROTATION == 90) {
+        xr = -y; yr = x;
+    } else if constexpr (ACCEL_SENSOR_ROTATION == 180) {
+        xr = -x; yr = -y;
+    } else if constexpr (ACCEL_SENSOR_ROTATION == 270) {
+        xr = y;  yr = -x;
+    } else {
+        xr = x;  yr = y;
     }
     
     // Apply flips (after rotation)
