@@ -60,7 +60,6 @@ HID Keyboard or gamepad mode for compatibility across different games:
 | GND         | GND       | Ground               |
 | SDA         | GPIO 8    | I²C data line        |
 | SCL         | GPIO 9    | I²C clock line       |
-| INT         | GPIO 10   | Motion interrupt pin |
 
 #### Button Connections
 
