@@ -1,3 +1,5 @@
+
+
 # ESP32 VR Pinball Controller
 
 A Bluetooth Low Energy (BLE) composite HID controller for VR pinball, with MPU6050 sensor for realistic nudging.
@@ -167,7 +169,7 @@ Mode is saved in EEPROM, so it will be restored on next boot.
 
 - Ensure MPU_INT_PIN wiring is correct
 - Check that SENSOR_ROTATION value in `config.h` matches MPU6050 orientation
-- Adjust ANALOG_NUDGE_MAX_ACCELERATION (FX) or ANALOG_NUDGE_MAX_VELOCITY (Classic & VPX) in `config.h`
+- Adjust ANALOG_NUDGE_MAX_ACCELERATION (Classic) or ANALOG_NUDGE_MAX_VELOCITY (VPX) in `config.h`
 
 ## Change Log
 
